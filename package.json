@@ -1,0 +1,25 @@
+{
+  "name": "panya",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^4.3.1",
+    "hono": "^4.13.13",
+    "seekdb": "^1.4.0"
+  },
+  "scripts": {
+    "dev": "bun --hot src/index.ts",
+    "start": "bun src/index.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "eval": "bun eval/run.ts",
+    "db:up": "docker compose up -d seekdb",
+    "db:down": "docker compose stop seekdb"
+  }
+}

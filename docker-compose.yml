@@ -1,0 +1,20 @@
+services:
+  seekdb:
+    image: oceanbase/seekdb:latest
+    container_name: panya-seekdb
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:2881:2881"
+    environment:
+      CPU_COUNT: 2
+      DATAFILE_SIZE: 1G
+      DATAFILE_NEXT: 1G
+      LOG_DISK_SIZE: 2G
+    volumes:
+      # ข้อมูลอยู่ที่ /var/lib/seekdb (เอกสารทางการเขียน /var/lib/oceanbase ซึ่งไม่ตรงกับ image นี้)
+      - panya-seekdb-data:/var/lib/seekdb
+    mem_limit: 3g
+
+volumes:
+  panya-seekdb-data:
+    external: true
