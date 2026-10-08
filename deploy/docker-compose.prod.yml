@@ -1,0 +1,54 @@
+# Production stack: panya + seekdb beside an existing app on the same Docker host.
+#
+#   APP_NETWORK   name of the app's Docker network; the app reaches panya at http://panya:6800
+#   .env          next to this file, mode 600, holds PANYA_API_KEYS
+#
+# Nothing is published to the host. seekdb's root user has an empty password
+# (the image ignores ROOT_PASSWORD), so it must stay on the internal network only.
+#
+# Memory caps keep a runaway query from starving the app that shares this host.
+# Measured 8 Oct 2026 with 2,000 memories and 360 concurrent searches:
+# panya about 575 MB, seekdb about 160 MB.
+name: panya
+
+services:
+  seekdb:
+    image: oceanbase/seekdb:latest
+    restart: unless-stopped
+    environment:
+      CPU_COUNT: 2
+      DATAFILE_SIZE: 1G
+      DATAFILE_NEXT: 1G
+      LOG_DISK_SIZE: 2G
+    volumes:
+      - panya-seekdb-data:/var/lib/seekdb
+    mem_limit: ${SEEKDB_MEM_LIMIT:-1g}
+    networks:
+      - internal
+
+  panya:
+    build:
+      context: ..
+    image: panya:prod
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      SEEKDB_HOST: seekdb
+      SEEKDB_READ_POOL: 2
+    depends_on:
+      - seekdb
+    mem_limit: ${PANYA_MEM_LIMIT:-900m}
+    networks:
+      internal: {}
+      app:
+        aliases:
+          - panya
+
+networks:
+  internal: {}
+  app:
+    external: true
+    name: ${APP_NETWORK:?set APP_NETWORK to the app's Docker network}
+
+volumes:
+  panya-seekdb-data: {}

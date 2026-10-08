@@ -50,6 +50,19 @@ bun run eval        # วัดคุณภาพการค้นคืนบ�
 bun run bench       # วัดความเร็ว
 ```
 
+## รันด้วย Docker
+
+`Dockerfile` สร้าง image ที่ฝังโมเดล embedding ไว้แล้ว ตอนเปิดจึงไม่ต้องต่ออินเทอร์เน็ต ส่วน `deploy/docker-compose.prod.yml` รัน panya กับ seekdb ข้างแอปที่มีอยู่บนเครื่องเดียวกัน ไม่เปิดพอร์ตออกนอกเครื่อง แอปเรียก panya ที่ `http://panya:6800` ผ่านเครือข่าย Docker ของแอปเอง และทั้งสองคอนเทนเนอร์มีเพดาน RAM
+
+```bash
+cd deploy
+printf 'PANYA_API_KEYS=%s
+' "$(openssl rand -hex 32)" > .env && chmod 600 .env
+APP_NETWORK=<เครือข่าย docker ของแอป> docker compose -f docker-compose.prod.yml up -d --build
+```
+
+วัดเมื่อ 8 ตุลาคม 2026 ด้วยความจำ 2,000 ข้อ และยิงค้นพร้อมกัน 360 ครั้งภายใต้เพดานนั้น: panya ใช้ราว 575 MB และ seekdb ราว 160 MB
+
 ## API
 
 ทุกเส้นทางใต้ `/v1` ต้องมี `Authorization: Bearer <key>`

@@ -50,6 +50,19 @@ bun run eval        # retrieval quality on eval/dataset.json
 bun run bench       # speed
 ```
 
+## Run with Docker
+
+`Dockerfile` builds the server with the embedding model baked in, so it needs no internet at start-up. `deploy/docker-compose.prod.yml` runs panya and seekdb beside an existing app on the same host: nothing is published to the host, the app reaches panya at `http://panya:6800` over its own Docker network, and both containers have memory caps.
+
+```bash
+cd deploy
+printf 'PANYA_API_KEYS=%s
+' "$(openssl rand -hex 32)" > .env && chmod 600 .env
+APP_NETWORK=<your app's docker network> docker compose -f docker-compose.prod.yml up -d --build
+```
+
+Measured on 8 October 2026 with 2,000 memories and 360 concurrent searches under those caps: panya about 575 MB, seekdb about 160 MB.
+
 ## API
 
 Every route under `/v1` needs `Authorization: Bearer <key>`.
