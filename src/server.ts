@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { config } from './config'
-import type { MemoryStore } from './memory'
+import type { MemoryStore, RememberInput } from './memory'
 
 type Env = { Variables: { scope: string | null } }
 
@@ -30,22 +30,43 @@ export function createApp(store: MemoryStore, apiKeys: string[] = config.apiKeys
     return requested
   }
 
+  // ตรวจรูปแบบของหนึ่งรายการ คืน error เป็นข้อความ หรือ input ที่พร้อมบันทึก
+  const parseMemory = (container: string, b: any): string | RememberInput => {
+    if (typeof b?.text !== 'string' || !b.text.trim()) return 'text is required'
+    if (b.text.length > 2000) return 'text too long (max 2000): send one fact per memory'
+    if (b.kind !== undefined && !KINDS.has(b.kind)) return 'invalid kind'
+    let validUntil: number | undefined
+    if (b.validUntil !== undefined) {
+      validUntil = typeof b.validUntil === 'number' ? b.validUntil : Date.parse(b.validUntil)
+      if (!Number.isFinite(validUntil)) return 'invalid validUntil'
+    }
+    return { container, text: b.text, subject: b.subject, attribute: b.attribute, kind: b.kind, validUntil, source: b.source }
+  }
+
   app.post('/v1/memories', async (c) => {
     const b = await c.req.json().catch(() => null)
     const container = containerOf(c.get('scope'), b?.container)
     if (!container) return c.json({ error: 'container not allowed' }, 403)
-    if (typeof b.text !== 'string' || !b.text.trim()) return c.json({ error: 'text is required' }, 400)
-    if (b.text.length > 2000) return c.json({ error: 'text too long (max 2000): send one fact per memory' }, 400)
-    if (b.kind !== undefined && !KINDS.has(b.kind)) return c.json({ error: 'invalid kind' }, 400)
-    let validUntil: number | undefined
-    if (b.validUntil !== undefined) {
-      validUntil = typeof b.validUntil === 'number' ? b.validUntil : Date.parse(b.validUntil)
-      if (!Number.isFinite(validUntil)) return c.json({ error: 'invalid validUntil' }, 400)
-    }
-    const r = await store.remember({
-      container, text: b.text, subject: b.subject, attribute: b.attribute, kind: b.kind, validUntil, source: b.source,
-    })
+    const input = parseMemory(container, b)
+    if (typeof input === 'string') return c.json({ error: input }, 400)
+    const r = await store.remember(input)
     return c.json(r, r.action === 'merged' ? 200 : 201)
+  })
+
+  // บันทึกหลายรายการในคำขอเดียว: { container, memories: [{ text, ... }] } เร็วกว่ายิงทีละรายการ
+  app.post('/v1/memories/batch', async (c) => {
+    const b = await c.req.json().catch(() => null)
+    const container = containerOf(c.get('scope'), b?.container)
+    if (!container) return c.json({ error: 'container not allowed' }, 403)
+    if (!Array.isArray(b.memories) || b.memories.length === 0) return c.json({ error: 'memories must be a non-empty array' }, 400)
+    if (b.memories.length > 200) return c.json({ error: 'too many memories (max 200 per request)' }, 400)
+    const inputs: RememberInput[] = []
+    for (let i = 0; i < b.memories.length; i++) {
+      const input = parseMemory(container, b.memories[i])
+      if (typeof input === 'string') return c.json({ error: `memories[${i}]: ${input}` }, 400)
+      inputs.push(input)
+    }
+    return c.json({ results: await store.rememberMany(inputs) }, 201)
   })
 
   app.post('/v1/search', async (c) => {

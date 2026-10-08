@@ -11,6 +11,8 @@ export const config = {
     password: process.env.SEEKDB_PASSWORD ?? '',
     database: process.env.SEEKDB_DATABASE ?? 'panya',
     collection: process.env.SEEKDB_COLLECTION ?? 'memories',
+    // จำนวน connection สำหรับอ่าน: SDK ใช้ connection เดียวต่อ client คำสั่งจึงเข้าคิวกัน
+    readPool: num(process.env.SEEKDB_READ_POOL, 4),
   },
   embed: {
     model: process.env.PANYA_EMBED_MODEL ?? 'Xenova/multilingual-e5-small',

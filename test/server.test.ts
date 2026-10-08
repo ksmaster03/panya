@@ -60,6 +60,32 @@ describe('memories', () => {
     expect(s.hits[0].text).toBe('ท่า D-07 ใช้ได้เฉพาะรถ 6 ล้อ')
   })
 
+  test('บันทึกเป็นชุด: รายการหลังทับรายการก่อนที่คีย์เดียวกัน', async () => {
+    const r = await call('POST', '/v1/memories/batch', 'a-key', {
+      container: A,
+      memories: [
+        { text: 'รถยก FL-21 พร้อมใช้งาน', subject: 'forklift:FL-21', attribute: 'status' },
+        { text: 'ลานจอดฝั่งตะวันออกปิดปรับปรุงพื้น' },
+        { text: 'รถยก FL-21 ส่งซ่อมแบตเตอรี่', subject: 'forklift:FL-21', attribute: 'status' },
+      ],
+    })
+    expect(r.status).toBe(201)
+    const body = (await r.json()) as any
+    expect(body.results.map((x: any) => x.action)).toEqual(['created', 'created', 'superseded'])
+    const s = (await (await call('POST', '/v1/search', 'a-key', { container: A, q: 'รถยก FL-21' })).json()) as any
+    expect(s.hits.map((h: any) => h.text)).toEqual(['รถยก FL-21 ส่งซ่อมแบตเตอรี่'])
+  })
+
+  test('บันทึกเป็นชุด: มีรายการผิดรูปแบบ ต้องไม่บันทึกอะไรเลย', async () => {
+    const r = await call('POST', '/v1/memories/batch', 'a-key', {
+      container: A, memories: [{ text: 'ประตู 9 เปิดเฉพาะวันเสาร์' }, { text: '' }],
+    })
+    expect(r.status).toBe(400)
+    const s = (await (await call('POST', '/v1/search', 'a-key', { container: A, q: 'ประตู 9 เปิดเฉพาะวันเสาร์' })).json()) as any
+    expect(s.hits.some((h: any) => h.text.includes('ประตู 9'))).toBe(false)
+    expect((await call('POST', '/v1/memories/batch', 'a-key', { container: B, memories: [{ text: 'x' }] })).status).toBe(403)
+  })
+
   test('ปฏิเสธข้อมูลที่ไม่ถูกรูปแบบ', async () => {
     expect((await call('POST', '/v1/memories', 'a-key', { container: A, text: '   ' })).status).toBe(400)
     expect((await call('POST', '/v1/memories', 'a-key', { container: A, text: 'x', kind: 'rumor' })).status).toBe(400)

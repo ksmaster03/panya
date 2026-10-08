@@ -50,6 +50,8 @@ export interface SearchResult {
   reason?: 'no_match' | 'unknown_entity'
 }
 
+export type RememberResult = { memory: Memory; action: 'created' | 'superseded' | 'merged' }
+
 type Meta = Record<string, string | number>
 const NEVER = 9_000_000_000_000_000
 
@@ -79,7 +81,16 @@ export class MemoryStore {
     private col: Collection,
     private embedder: Embedder,
     readonly entities: EntityRegistry,
+    private readers: { client: SeekdbClient; col: Collection }[],
   ) {}
+
+  private next = 0
+  /** connection สำหรับอ่าน วนใช้ทีละตัว เพื่อให้คำสั่งที่ยิงพร้อมกันไม่ต้องเข้าคิวบน connection เดียว */
+  private reader(): Collection {
+    if (!this.readers.length) return this.col
+    this.next = (this.next + 1) % this.readers.length
+    return this.readers[this.next]!.col
+  }
 
   static async open(
     embedder: Embedder,
@@ -114,10 +125,16 @@ export class MemoryStore {
         }),
       }),
     })
-    return new MemoryStore(client, col, embedder, await EntityRegistry.open(client))
+    const readers: { client: SeekdbClient; col: Collection }[] = []
+    for (let i = 0; i < c.readPool; i++) {
+      const rc = new SeekdbClient({ host: c.host, port: c.port, user: c.user, password: c.password, database: c.database })
+      readers.push({ client: rc, col: await rc.getCollection({ name: c.collection, embeddingFunction: null }) })
+    }
+    return new MemoryStore(client, col, embedder, await EntityRegistry.open(client), readers)
   }
 
   async close() {
+    await Promise.all(this.readers.map((r) => r.client.close()))
     await this.client.close()
   }
 
@@ -125,14 +142,32 @@ export class MemoryStore {
     return { $and: [{ container }, { active: 1 }, { validUntil: { $gt: now } }] }
   }
 
-  async remember(input: RememberInput): Promise<{ memory: Memory; action: 'created' | 'superseded' | 'merged' }> {
+  /**
+   * บันทึกหลายรายการ: คำนวณ embedding รวมเป็นชุดเดียว (ส่วนที่ช้าที่สุด) แล้วเขียนตามลำดับ
+   * ลำดับสำคัญ เพราะรายการหลังอาจทับหรือซ้ำกับรายการก่อนในชุดเดียวกัน
+   */
+  async rememberMany(inputs: RememberInput[]): Promise<RememberResult[]> {
+    for (const i of inputs) {
+      if (!i.text?.trim()) throw new Error('text is empty')
+      if (!i.container) throw new Error('container is required')
+    }
+    const vectors: number[][] = []
+    for (let i = 0; i < inputs.length; i += 32) {
+      vectors.push(...(await this.embedder.passage(inputs.slice(i, i + 32).map((x) => x.text.trim()))))
+    }
+    const out: RememberResult[] = []
+    for (let i = 0; i < inputs.length; i++) out.push(await this.remember(inputs[i]!, vectors[i]))
+    return out
+  }
+
+  async remember(input: RememberInput, precomputed?: number[]): Promise<RememberResult> {
     const text = input.text.trim()
     if (!text) throw new Error('text is empty')
     if (!input.container) throw new Error('container is required')
     const now = input.now ?? Date.now()
     const subject = input.subject?.trim() ?? ''
     const attribute = input.attribute?.trim() ?? ''
-    const [embedding] = await this.embedder.passage([text])
+    const embedding: number[][] = [precomputed ?? (await this.embedder.passage([text]))[0]!]
     const id = crypto.randomUUID()
     let action: 'created' | 'superseded' | 'merged' = 'created'
 
@@ -204,34 +239,48 @@ export class MemoryStore {
     const types = await this.entities.list(container)
     const qNorm = norm(q)
     const known = types.flatMap((t) => t.names).map(norm).filter((n) => qNorm.includes(n))
-    if (!known.length && (await this.asksAboutUnknownEntity(q, types.flatMap((t) => t.cues), where))) {
-      return { hits: [], abstained: true, reason: 'unknown_entity' }
-    }
+    // สามงานนี้ไม่ขึ้นต่อกัน ยิงพร้อมกันบนคนละ connection
+    const unknownP = known.length
+      ? Promise.resolve(false)
+      : this.asksAboutUnknownEntity(q, types.flatMap((t) => t.cues), where)
+    const lexP = qTokens.length
+      ? this.reader().hybridSearch({
+          query: { whereDocument: { $contains: [...new Set(qTokens)].join(' ') }, where, nResults: t.candidates },
+          nResults: t.candidates,
+          include: ['documents', 'metadatas'],
+        })
+      : Promise.resolve(null)
+    const denseP = this.embedder.query(q).then(async (qVec) => ({
+      qVec,
+      dense: await this.reader().query({ queryEmbeddings: qVec, nResults: t.candidates, where, include: ['documents', 'metadatas', 'distances'] }),
+    }))
+    // กัน unhandled rejection ถ้าออกก่อนเพราะ unknown_entity
+    lexP.catch(() => {})
+    denseP.catch(() => {})
 
-    const qVec = await this.embedder.query(q)
-
-    const [dense, lex] = await Promise.all([
-      this.col.query({ queryEmbeddings: qVec, nResults: t.candidates, where, include: ['documents', 'metadatas', 'distances'] }),
-      qTokens.length
-        ? this.col.hybridSearch({
-            query: { whereDocument: { $contains: [...new Set(qTokens)].join(' ') }, where, nResults: t.candidates },
-            nResults: t.candidates,
-            include: ['documents', 'metadatas', 'embeddings'],
-          })
-        : Promise.resolve(null),
-    ])
+    if (await unknownP) return { hits: [], abstained: true, reason: 'unknown_entity' }
+    const [{ qVec, dense }, lex] = await Promise.all([denseP, lexP])
 
     const cand = new Map<string, { meta: Meta; doc: string; sim: number }>()
     dense.ids[0]?.forEach((id, i) => {
       const d = dense.distances?.[0]?.[i]
       cand.set(id, { meta: dense.metadatas?.[0]?.[i] as Meta, doc: dense.documents?.[0]?.[i] ?? '', sim: d == null ? 0 : 1 - d })
     })
+    // ผู้สมัครที่มาจากฝั่งคำอย่างเดียว (ส่วนน้อย) ค่อยไปขอเวกเตอร์มาคิดความคล้าย
+    const lexOnly: string[] = []
     lex?.ids[0]?.forEach((id, i) => {
       if (cand.has(id)) return
-      const v = lex.embeddings?.[0]?.[i]
-      const sim = v ? v.reduce((s, x, k) => s + x * qVec[k]!, 0) : 0
-      cand.set(id, { meta: lex.metadatas?.[0]?.[i] as Meta, doc: lex.documents?.[0]?.[i] ?? '', sim })
+      lexOnly.push(id)
+      cand.set(id, { meta: lex.metadatas?.[0]?.[i] as Meta, doc: lex.documents?.[0]?.[i] ?? '', sim: 0 })
     })
+    if (lexOnly.length) {
+      const got = await this.reader().get({ ids: lexOnly, include: ['embeddings'] })
+      got.ids.forEach((id, i) => {
+        const v = got.embeddings?.[i]
+        const c = cand.get(id)
+        if (v && c) c.sim = v.reduce((s, x, k) => s + x * qVec[k]!, 0)
+      })
+    }
 
     // รหัสคือตัวระบุ: ถ้าคำค้นเจาะจงรหัส (D-11, BK-2026-0001) ความจำที่ไม่มีรหัสนั้นไม่ใช่คำตอบ
     const qCodes = extractCodes(q)
@@ -267,11 +316,10 @@ export class MemoryStore {
       if (at < 0) continue
       const next = tokenize(q.slice(at + cue.length)).slice(0, 3)
       if (!next.length) continue
-      let novel = 0
-      for (const token of next) {
-        const r = await this.col.get({ where, whereDocument: { $contains: token }, limit: 1, include: [] })
-        if (r.ids.length === 0) novel++
-      }
+      const found = await Promise.all(
+        next.map((token) => this.reader().get({ where, whereDocument: { $contains: token }, limit: 1, include: [] })),
+      )
+      const novel = found.filter((r) => r.ids.length === 0).length
       if (novel >= Math.min(2, next.length)) return true
     }
     return false
@@ -280,7 +328,7 @@ export class MemoryStore {
   /** ความจำที่ยังใช้ได้ของ container: ความชอบ/ข้อเท็จจริงที่มีคีย์ + รายการล่าสุด */
   async profile(container: string, opts: { limit?: number; now?: number } = {}) {
     const now = opts.now ?? Date.now()
-    const r = await this.col.get({ where: this.liveWhere(container, now), include: ['metadatas'], limit: 1000 })
+    const r = await this.reader().get({ where: this.liveWhere(container, now), include: ['metadatas'], limit: 1000 })
     const all = r.ids.map((id, i) => toMemory(id, r.metadatas?.[i] as Meta))
     all.sort((a, b) => b.lastSeenAt - a.lastSeenAt)
     return {

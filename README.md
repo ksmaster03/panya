@@ -8,6 +8,8 @@
 
 Built for Thai and English text. Runs on Bun, TypeScript and [seekdb](https://github.com/oceanbase/seekdb).
 
+Source-available: free for noncommercial use, [paid license for commercial use](COMMERCIAL.md).
+
 ## Why
 
 LLM-based memory layers read your text and write their own version of it. In a trial with one such tool, "closed until Wednesday" came back as "closed until Wednesday 11 October", a date nobody wrote. Each write also took 18 to 25 seconds, and an off-topic question still returned three confident memories.
@@ -44,6 +46,7 @@ bun run dev                   # http://127.0.0.1:6800
 bun run test        # needs seekdb running
 bun run typecheck
 bun run eval        # retrieval quality on eval/dataset.json
+bun run bench       # speed
 ```
 
 ## API
@@ -53,6 +56,7 @@ Every route under `/v1` needs `Authorization: Bearer <key>`.
 | Route | Purpose |
 |---|---|
 | `POST /v1/memories` | Store `{ container, text, subject?, attribute?, kind?, validUntil?, source? }` |
+| `POST /v1/memories/batch` | Store up to 200 at once: `{ container, memories: [...] }`. All-or-nothing validation |
 | `POST /v1/search` | `{ container, q, limit? }` returns `{ hits, abstained, reason? }` |
 | `GET /v1/profile?container=` | Preferences, keyed facts and recent items |
 | `PUT /v1/entities` | Register names: `{ container, type, cues, names }` |
@@ -89,7 +93,7 @@ Thresholds live in `src/config.ts` and come from `bun run eval`, which tunes on 
 | Correct in top 3 | 90% | 92% | 44% |
 | Abstains when an answer exists | 10% | 3% | 56% |
 | Abstains when no answer exists | 76% | 0% | 100% |
-| Search latency (mean) | 31 ms | 78 ms | 78 ms |
+| Search latency (mean) | 20 ms | 78 ms | 78 ms |
 
 Read this honestly: panya does **not** rank better than the baseline. Ranking is about equal. What it adds is the ability to decline: a single score threshold cannot do that without throwing away more than half the real answers.
 
@@ -97,7 +101,17 @@ The baseline is supermemory self-hosted 0.0.8, document search, `multilingual-e5
 
 Reproduce: `bun run eval` and `bun eval/baseline-supermemory.ts ingest|measure`.
 
-Other measurements: 42 ms per write, about 1 GB RSS for the panya process, seekdb documents a 2 GB minimum.
+Speed, from `bun run bench` on 8 October 2026 (same laptop, seekdb in Docker):
+
+| Operation | Time |
+|---|---|
+| Search, new query | 18 ms mean, 30 ms p95 |
+| Search, repeated query (embedding cached) | 9 ms mean, 14 ms p95 |
+| 120 searches fired at once | 236 queries per second |
+| Write, one at a time | 25 ms per memory |
+| Write, batch endpoint | 12 ms per memory |
+
+Memory: about 1 GB RSS for the panya process; seekdb documents a 2 GB minimum.
 
 ## Known limitations
 
@@ -108,3 +122,11 @@ Other measurements: 42 ms per write, about 1 GB RSS for the panya process, seekd
 - seekdb embedded mode hung on Windows under both Bun and Node (tested 7 October 2026). Use the Docker server.
 - The `oceanbase/seekdb` image ignored `ROOT_PASSWORD` in our test; root has an empty password. Set one with SQL before exposing the port.
 - The eval set is small and from one domain. Re-run it on your own data before trusting the thresholds.
+
+## License
+
+[PolyForm Noncommercial 1.0.0](LICENSE.md). Free for personal, research, educational and other noncommercial use. **Commercial use needs a paid license**: see [COMMERCIAL.md](COMMERCIAL.md).
+
+This is a source-available license, not an OSI-approved open source license.
+
+All names in `eval/dataset.json` are invented for testing. Any resemblance to a real company or person is coincidental.
