@@ -28,7 +28,8 @@ panya takes the opposite position:
 - Duplicate merging for unkeyed text
 - Identifier rule: if the query names a code (`D-04`, `70-1234`, `BK-2026-0912`), memories without that code are excluded
 - Entity registry: knows your customers and carriers by name, and refuses to answer about a name it has never seen
-- Tenant isolation enforced on the server; an API key can be bound to one container
+- Tenant isolation enforced on the server; an API key can be bound to one brain
+- Your data stays yours: export a whole brain to JSON and import it anywhere
 
 ## Quick start
 
@@ -55,28 +56,48 @@ Every route under `/v1` needs `Authorization: Bearer <key>`.
 
 | Route | Purpose |
 |---|---|
-| `POST /v1/memories` | Store `{ container, text, subject?, attribute?, kind?, validUntil?, source? }` |
-| `POST /v1/memories/batch` | Store up to 200 at once: `{ container, memories: [...] }`. All-or-nothing validation |
-| `POST /v1/search` | `{ container, q, limit? }` returns `{ hits, abstained, reason? }` |
-| `GET /v1/profile?container=` | Preferences, keyed facts and recent items |
-| `PUT /v1/entities` | Register names: `{ container, type, cues, names }` |
-| `GET /v1/entities?container=` | List registered names |
-| `DELETE /v1/memories/:id?container=` | Delete one memory |
+| `POST /v1/memories` | Store `{ brain, text, subject?, attribute?, kind?, validUntil?, source?, ref? }` |
+| `POST /v1/memories/batch` | Store up to 200 at once: `{ brain, memories: [...] }`. All-or-nothing validation |
+| `POST /v1/search` | `{ brain, q, limit?, minScore? }` returns `{ hits, abstained, reason? }` |
+| `GET /v1/graph?brain=` | Nodes with 2D positions and nearest-neighbour edges, for the brain view |
+| `GET /v1/profile?brain=` | Preferences, keyed facts and recent items |
+| `PUT /v1/entities` | Register names: `{ brain, type, cues, names }` |
+| `GET /v1/entities?brain=` | List registered names |
+| `GET /v1/export?brain=` | Everything in the brain as JSON (`&history=1` includes superseded versions) |
+| `POST /v1/import` | Load an export: `{ brain, memories, entities?, replace? }`, up to 5000 per request |
+| `GET /v1/stats?brain=` | Number of live memories |
+| `DELETE /v1/memories/:id?brain=` | Delete one memory |
+| `DELETE /v1/sources?brain=&source=` | Delete everything that came from one source |
+| `DELETE /v1/brain?brain=&confirm=` | Erase a brain. `confirm` must repeat the brain name |
 
 ```bash
 curl -s localhost:6800/v1/memories -H "authorization: Bearer $KEY" -H "content-type: application/json" \
-  -d '{"container":"warehouse-1","text":"Dock D-02 is closed for leveler repair","subject":"dock:D-02","attribute":"status","validUntil":"2026-10-09T00:00:00Z"}'
+  -d '{"brain":"warehouse-1","text":"Dock D-02 is closed for leveler repair","subject":"dock:D-02","attribute":"status","validUntil":"2026-10-09T00:00:00Z"}'
 
 curl -s localhost:6800/v1/search -H "authorization: Bearer $KEY" -H "content-type: application/json" \
-  -d '{"container":"warehouse-1","q":"is dock D-02 usable"}'
+  -d '{"brain":"warehouse-1","q":"is dock D-02 usable"}'
 ```
 
-API keys are set in `PANYA_API_KEYS`, comma separated. `key` works for every container; `key@container` works for that container only.
+A **brain** is one isolated set of memories (one customer, one project, one agent). API keys are set in `PANYA_API_KEYS`, comma separated. `key` works for every brain; `key@brain` works for that brain only. The field name `container` from earlier versions is still accepted.
+
+## Brain view
+
+Open `http://127.0.0.1:6800/brain` and sign in with a brain name and its API key. The page has an export button that downloads the whole brain as JSON. Every memory is a point inside a brain outline; memories with similar meaning sit close together and are joined by lines. Type a question and the matching memories light up, or the page tells you the brain chose not to answer. The page itself holds no data: everything comes from `/v1/graph` and `/v1/search` with your key.
+
+## Import Claude Code memory
+
+```bash
+bun run import:claude-memory --dry          # count what would be imported
+bun run import:claude-memory                # every ~/.claude/projects/*/memory folder
+bun run import:claude-memory <folder> --brain my-notes
+```
+
+Each file becomes several short memories (its description plus paragraph-sized chunks). Tokens and keys are replaced with `[redacted]` before storage. Re-running replaces what was imported from the same file. The data stays in your local seekdb.
 
 ## How it decides
 
 1. Tokenise the query. Thai goes through `Intl.Segmenter`; codes are kept whole.
-2. If the query mentions a registered name, keep only memories that mention it. If a cue word such as "customer" is followed by words that appear nowhere in this container's memories, abstain with `reason: "unknown_entity"`.
+2. If the query mentions a registered name, keep only memories that mention it. If a cue word such as "customer" is followed by words that appear nowhere in this brain's memories, abstain with `reason: "unknown_entity"`.
 3. Fetch candidates by vector similarity and by full-text match.
 4. Drop candidates that lack a code the query asked for.
 5. Score each candidate from normalised similarity and the share of query words it contains. Anything under `minScore` is discarded. No survivors means `abstained: true`.

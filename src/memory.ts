@@ -17,6 +17,8 @@ export interface RememberInput {
   /** หมดอายุเมื่อไร (epoch ms) ไม่ใส่ = ไม่หมดอายุ */
   validUntil?: number
   source?: string
+  /** รหัสอ้างอิงของผู้เรียกเอง เช่น id ของแถวในระบบต้นทาง คืนกลับมาพร้อมผลค้น */
+  ref?: string
   now?: number
 }
 
@@ -34,6 +36,7 @@ export interface Memory {
   supersededBy: string
   count: number
   source: string
+  ref: string
 }
 
 export interface SearchHit extends Memory {
@@ -48,6 +51,23 @@ export interface SearchResult {
   abstained: boolean
   /** เหตุที่ไม่ตอบ: unknown_entity = คำค้นถามถึงรายที่ไม่มีในทะเบียนและไม่เคยปรากฏในความจำ */
   reason?: 'no_match' | 'unknown_entity'
+}
+
+export interface GraphNode {
+  id: string
+  text: string
+  kind: Kind
+  subject: string
+  source: string
+  createdAt: number
+  count: number
+  x: number
+  y: number
+}
+export interface Graph {
+  nodes: GraphNode[]
+  /** [ดัชนีโหนด, ดัชนีโหนด, ความคล้าย] */
+  edges: [number, number, number][]
 }
 
 export type RememberResult = { memory: Memory; action: 'created' | 'superseded' | 'merged' }
@@ -70,6 +90,7 @@ function toMemory(id: string, m: Meta): Memory {
     supersededBy: String(m.supersededBy ?? ''),
     count: Number(m.count ?? 1),
     source: String(m.source ?? ''),
+    ref: String(m.ref ?? ''),
   }
 }
 
@@ -213,6 +234,7 @@ export class MemoryStore {
       supersededBy: '',
       count: 1,
       source: input.source ?? '',
+      ref: input.ref ?? '',
       codes: extractCodes(text).join(' '),
     }
     await this.col.add({ ids: id, documents: tokenize(text).join(' '), embeddings: embedding!, metadatas: meta })
@@ -338,6 +360,72 @@ export class MemoryStore {
     }
   }
 
+  /**
+   * ข้อมูลสำหรับวาดแผนที่ความจำ: ตำแหน่ง 2 มิติจาก PCA ของ embedding + เส้นเชื่อมเพื่อนบ้านที่ใกล้ที่สุด
+   * ความจำที่ความหมายใกล้กันจะอยู่ใกล้กันบนแผนที่
+   */
+  async graph(container: string, opts: { limit?: number; neighbors?: number; now?: number } = {}): Promise<Graph> {
+    const now = opts.now ?? Date.now()
+    const limit = Math.min(opts.limit ?? 1500, 3000)
+    const k = opts.neighbors ?? 2
+    const r = await this.reader().get({ where: this.liveWhere(container, now), include: ['metadatas', 'embeddings'], limit })
+    const n = r.ids.length
+    const vecs = r.embeddings?.map((v) => v ?? []) ?? []
+    const dim = vecs[0]?.length ?? 0
+    const nodes: GraphNode[] = r.ids.map((id, i) => {
+      const m = toMemory(id, r.metadatas?.[i] as Meta)
+      return { id, text: m.text, kind: m.kind, subject: m.subject, source: m.source, createdAt: m.createdAt, count: m.count, x: 0, y: 0 }
+    })
+    if (n < 2 || !dim) return { nodes, edges: [] }
+
+    // PCA 2 แกนด้วย power iteration บนข้อมูลที่ลบค่าเฉลี่ยแล้ว
+    const mean = new Float64Array(dim)
+    for (const v of vecs) for (let d = 0; d < dim; d++) mean[d]! += v[d]! / n
+    const project = (axis: Float64Array) => vecs.map((v) => { let s = 0; for (let d = 0; d < dim; d++) s += (v[d]! - mean[d]!) * axis[d]!; return s })
+    const component = (deflate?: Float64Array) => {
+      let axis = Float64Array.from({ length: dim }, (_, d) => Math.sin(d * 12.9898 + (deflate ? 1 : 0)) )
+      for (let it = 0; it < 40; it++) {
+        const scores = project(axis)
+        const next = new Float64Array(dim)
+        vecs.forEach((v, i) => { for (let d = 0; d < dim; d++) next[d]! += (v[d]! - mean[d]!) * scores[i]! })
+        if (deflate) { let dot = 0; for (let d = 0; d < dim; d++) dot += next[d]! * deflate[d]!; for (let d = 0; d < dim; d++) next[d]! -= dot * deflate[d]! }
+        let len = 0; for (let d = 0; d < dim; d++) len += next[d]! * next[d]!
+        len = Math.sqrt(len) || 1
+        for (let d = 0; d < dim; d++) next[d]! /= len
+        axis = next
+      }
+      return axis
+    }
+    const a1 = component()
+    const a2 = component(a1)
+    const xs = project(a1)
+    const ys = project(a2)
+    nodes.forEach((node, i) => { node.x = xs[i]!; node.y = ys[i]! })
+
+    // เพื่อนบ้านที่ใกล้ที่สุด k ตัว (เวกเตอร์ normalize แล้ว dot = cosine)
+    const edges: [number, number, number][] = []
+    const seen = new Set<string>()
+    for (let i = 0; i < n; i++) {
+      const best: [number, number][] = []
+      const vi = vecs[i]!
+      for (let j = 0; j < n; j++) {
+        if (i === j) continue
+        const vj = vecs[j]!
+        let s = 0
+        for (let d = 0; d < dim; d++) s += vi[d]! * vj[d]!
+        if (best.length < k) { best.push([j, s]); best.sort((p, q) => q[1] - p[1]) }
+        else if (s > best[k - 1]![1]) { best[k - 1] = [j, s]; best.sort((p, q) => q[1] - p[1]) }
+      }
+      for (const [j, sim] of best) {
+        const key = i < j ? `${i}-${j}` : `${j}-${i}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        edges.push([i, j, Math.round(sim * 1000) / 1000])
+      }
+    }
+    return { nodes, edges }
+  }
+
   /** ประวัติของคีย์หนึ่ง รวมรุ่นที่ถูกแทนแล้ว ใหม่สุดก่อน */
   async history(container: string, subject: string, attribute: string): Promise<Memory[]> {
     const r = await this.col.get({ where: { $and: [{ container }, { subject }, { attribute }] }, include: ['metadatas'] })
@@ -350,6 +438,34 @@ export class MemoryStore {
     if (!r.ids.length || !m || m.container !== container) return false
     await this.col.delete({ ids: id })
     return true
+  }
+
+  /** ความจำทั้งหมดของ brain สำหรับส่งออก เรียงจากเก่าไปใหม่ · history = รวมรุ่นที่ถูกแทนและที่หมดอายุแล้ว */
+  async exportAll(container: string, opts: { history?: boolean; now?: number } = {}): Promise<Memory[]> {
+    const where: Where = opts.history ? { container } : this.liveWhere(container, opts.now ?? Date.now())
+    const out: Memory[] = []
+    for (let offset = 0; ; offset += 1000) {
+      const r = await this.reader().get({ where, include: ['metadatas'], limit: 1000, offset })
+      r.ids.forEach((id, i) => out.push(toMemory(id, r.metadatas?.[i] as Meta)))
+      if (r.ids.length < 1000) break
+    }
+    return out.sort((a, b) => a.createdAt - b.createdAt)
+  }
+
+  /** จำนวนความจำที่ยังใช้ได้ */
+  async count(container: string, now = Date.now()): Promise<number> {
+    let n = 0
+    for (let offset = 0; ; offset += 1000) {
+      const r = await this.reader().get({ where: this.liveWhere(container, now), include: [], limit: 1000, offset })
+      n += r.ids.length
+      if (r.ids.length < 1000) break
+    }
+    return n
+  }
+
+  /** ลบความจำทั้งหมดที่มาจากแหล่งเดียวกัน (รวมรุ่นเก่า) ใช้ก่อนนำเข้าไฟล์เดิมซ้ำ */
+  async forgetSource(container: string, source: string) {
+    await this.col.delete({ where: { $and: [{ container }, { source }] } })
   }
 
   async clear(container: string) {
