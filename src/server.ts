@@ -24,6 +24,59 @@ export function createApp(store: MemoryStore, apiKeys: string[] = config.apiKeys
 
   // หน้าแผนที่ความจำ: ตัวหน้าไม่มีข้อมูล ข้อมูลมาจาก /v1/graph ซึ่งต้องมี key
   app.get('/brain', async (c) => c.html(await Bun.file(new URL('./brain.html', import.meta.url)).text()))
+  // หน้าแดชบอร์ดรวมทุก brain: ข้อมูลมาจาก /v1/overview ซึ่งต้องมี key เช่นกัน
+  app.get('/dashboard', async (c) => c.html(await Bun.file(new URL('./dashboard.html', import.meta.url)).text()))
+
+  // ── ตัวนับการใช้งาน ───────────────────────────────────────────────
+  // อยู่ในหน่วยความจำของ process นี้ รีสตาร์ตแล้วเริ่มนับใหม่ · วงแหวน 60 ช่อง ช่องละหนึ่งนาที
+  const startedAt = Date.now()
+  const ring = Array.from({ length: 60 }, () => ({ minute: -1, searches: 0, abstained: 0 }))
+  const usage = { searches: 0, abstained: 0, searchMs: 0 }
+  const recordSearch = (ms: number, abstained: boolean) => {
+    const minute = Math.floor(Date.now() / 60_000)
+    const slot = ring[minute % 60]!
+    if (slot.minute !== minute) { slot.minute = minute; slot.searches = 0; slot.abstained = 0 }
+    slot.searches++; usage.searches++; usage.searchMs += ms
+    if (abstained) { slot.abstained++; usage.abstained++ }
+  }
+
+  // ── เหตุการณ์สด ───────────────────────────────────────────────────
+  // ความจำที่เข้า (เขียน) ออก (ค้น) และถูกลบ ผ่านเซิร์ฟเวอร์นี้ เก็บ 300 รายการล่าสุดไว้ให้หน้าแดชบอร์ดดึงไปแสดง
+  type LiveEvent = {
+    seq: number; at: number; type: 'in' | 'out' | 'del'; brain: string; n: number; text: string
+    created?: number; superseded?: number; merged?: number
+    hits?: number; abstained?: boolean; reason?: string; ms?: number; what?: 'memory' | 'source' | 'brain'
+  }
+  const events: LiveEvent[] = []
+  let seq = 0
+  const snip = (s: string) => (s.length > 140 ? s.slice(0, 140) + '…' : s)
+  const emit = (e: Omit<LiveEvent, 'seq' | 'at'>) => {
+    events.push({ seq: ++seq, at: Date.now(), ...e })
+    if (events.length > 300) events.shift()
+  }
+  const tally = (results: { action: 'created' | 'superseded' | 'merged' }[]) => {
+    const t = { created: 0, superseded: 0, merged: 0 }
+    for (const r of results) t[r.action]++
+    return t
+  }
+
+  // สถิติรวมต้องอ่านทั้ง collection จึงเก็บผลไว้ชั่วครู่ และทิ้งทันทีเมื่อมีการเขียนหรือลบผ่านเซิร์ฟเวอร์นี้
+  const OVERVIEW_TTL = 5000
+  type Overview = { at: number; ms: number; brains: Awaited<ReturnType<MemoryStore['overview']>> }
+  let overview: Overview | null = null
+  let scanning: Promise<Overview> | null = null
+  const changed = () => { overview = null }
+  const loadOverview = (): Promise<Overview> => {
+    if (overview && Date.now() - overview.at < OVERVIEW_TTL) return Promise.resolve(overview)
+    scanning ??= (async () => {
+      const t0 = performance.now()
+      const brains = await store.overview()
+      const fresh: Overview = { at: Date.now(), ms: Math.round(performance.now() - t0), brains }
+      overview = fresh
+      return fresh
+    })().finally(() => { scanning = null })
+    return scanning
+  }
 
   app.use('/v1/*', async (c, next) => {
     const token = c.req.header('authorization')?.replace(/^Bearer\s+/i, '') ?? ''
@@ -82,6 +135,8 @@ export function createApp(store: MemoryStore, apiKeys: string[] = config.apiKeys
     const input = parseMemory(brain, b)
     if (typeof input === 'string') return c.json({ error: input }, 400)
     const r = await store.remember(input)
+    changed()
+    emit({ type: 'in', brain, n: 1, text: snip(input.text), ...tally([r]) })
     return c.json({ memory: present(r.memory), action: r.action }, r.action === 'merged' ? 200 : 201)
   })
 
@@ -93,6 +148,8 @@ export function createApp(store: MemoryStore, apiKeys: string[] = config.apiKeys
     const inputs = parseMany(brain, b.memories, 200)
     if (typeof inputs === 'string') return c.json({ error: inputs }, 400)
     const results = await store.rememberMany(inputs)
+    changed()
+    emit({ type: 'in', brain, n: inputs.length, text: snip(inputs[0]!.text), ...tally(results) })
     return c.json({ results: results.map((r) => ({ memory: present(r.memory), action: r.action })) }, 201)
   })
 
@@ -105,7 +162,11 @@ export function createApp(store: MemoryStore, apiKeys: string[] = config.apiKeys
     const limit = Math.max(1, Math.min(20, Number(b.limit) || 5))
     // minScore ให้ผู้เรียกปรับความเข้มของการไม่ตอบได้ ถ้าเนื้อหาต่างจากที่เกณฑ์ตั้งต้นถูกปรับมา
     const tuning = typeof b.minScore === 'number' && b.minScore >= 0 && b.minScore <= 1 ? { minScore: b.minScore } : undefined
+    const t0 = performance.now()
     const r = await store.search(brain, b.q, { limit, tuning })
+    const ms = Math.round(performance.now() - t0)
+    recordSearch(ms, r.abstained)
+    emit({ type: 'out', brain, n: r.hits.length, text: snip(b.q), hits: r.hits.length, abstained: r.abstained, reason: r.reason, ms })
     return c.json({ ...r, hits: r.hits.map(({ container, ...h }) => ({ ...h, brain: container })) })
   })
 
@@ -127,6 +188,57 @@ export function createApp(store: MemoryStore, apiKeys: string[] = config.apiKeys
     const brain = brainOf(c.get('scope'), c.req.query('brain'))
     if (!brain) return c.json(denied, 403)
     return c.json({ brain, memories: await store.count(brain) })
+  })
+
+  // สถิติของทุก brain ที่ key นี้เข้าถึงได้ · key ที่ผูก brain เห็นเฉพาะ brain ของตัวเอง และไม่เห็นตัวเลขของเซิร์ฟเวอร์
+  app.get('/v1/overview', async (c) => {
+    const scope = c.get('scope')
+    const o = await loadOverview()
+    const brains = scope === null ? o.brains : o.brains.filter((b) => b.brain === scope)
+    if (scope !== null) return c.json({ now: o.at, brains })
+    const minute = Math.floor(Date.now() / 60_000)
+    const last60 = Array.from({ length: 60 }, (_, i) => {
+      const m = minute - 59 + i
+      const slot = ring[m % 60]!
+      return slot.minute === m ? slot : { searches: 0, abstained: 0 }
+    })
+    return c.json({
+      now: o.at,
+      brains,
+      searches: {
+        total: usage.searches, abstained: usage.abstained, avgMs: usage.searches ? Math.round(usage.searchMs / usage.searches) : 0,
+        minute: last60.map((s) => s.searches), abstainedMinute: last60.map((s) => s.abstained),
+      },
+      server: { startedAt, scanMs: o.ms, rssMb: Math.round(process.memoryUsage().rss / 1048576) },
+    })
+  })
+
+  // ── อ่านทั้งชุดตาม subject ────────────────────────────────────────
+  // ใช้กับเอกสารที่ถูกตัดเป็นหลายความจำใต้ subject เดียว (เช่น skill หรือไฟล์ความจำ) เพื่อประกอบกลับตามลำดับ
+  app.get('/v1/memories', async (c) => {
+    const brain = brainOf(c.get('scope'), c.req.query('brain'), c.req.query('container'))
+    if (!brain) return c.json(denied, 403)
+    const subject = c.req.query('subject')
+    if (!subject || subject.length > 191) return c.json({ error: 'subject is required (max 191)' }, 400)
+    return c.json({ brain, subject, memories: (await store.bySubject(brain, subject)).map(present) })
+  })
+
+  // รายชื่อ subject ที่ขึ้นต้นด้วย prefix พร้อมจำนวนชิ้นและคำอธิบาย
+  app.get('/v1/subjects', async (c) => {
+    const brain = brainOf(c.get('scope'), c.req.query('brain'), c.req.query('container'))
+    if (!brain) return c.json(denied, 403)
+    const prefix = c.req.query('prefix') ?? ''
+    if (prefix.length > 191) return c.json({ error: 'prefix too long (max 191)' }, 400)
+    return c.json({ brain, prefix, subjects: await store.subjects(brain, prefix) })
+  })
+
+  // เหตุการณ์สดหลังลำดับ after · ไม่ส่ง after = 40 รายการล่าสุด · key ที่ผูก brain เห็นเฉพาะของ brain ตัวเอง
+  app.get('/v1/events', (c) => {
+    const scope = c.get('scope')
+    const after = c.req.query('after')
+    let list = scope === null ? events : events.filter((e) => e.brain === scope)
+    list = after === undefined ? list.slice(-40) : list.filter((e) => e.seq > Number(after)).slice(-200)
+    return c.json({ seq, now: Date.now(), events: list })
   })
 
   // ── นำข้อมูลออก/เข้า ─────────────────────────────────────────────
@@ -155,12 +267,14 @@ export function createApp(store: MemoryStore, apiKeys: string[] = config.apiKeys
     if (typeof inputs === 'string') return c.json({ error: inputs }, 400)
     const entities = b.entities ?? []
     if (!Array.isArray(entities) || !entities.every(validEntity)) return c.json({ error: 'invalid entities' }, 400)
+    changed()
     if (b.replace === true) await store.clear(brain)
     for (const e of entities) await store.entities.register(brain, e.type, e.cues ?? [], e.names ?? [])
     const counts = { created: 0, superseded: 0, merged: 0 }
     for (let i = 0; i < inputs.length; i += 200) {
       for (const r of await store.rememberMany(inputs.slice(i, i + 200))) counts[r.action]++
     }
+    emit({ type: 'in', brain, n: inputs.length, text: snip(inputs[0]!.text), ...counts })
     return c.json({ brain, imported: inputs.length, ...counts }, 201)
   })
 
@@ -190,6 +304,8 @@ export function createApp(store: MemoryStore, apiKeys: string[] = config.apiKeys
     const brain = brainOf(c.get('scope'), c.req.query('brain'), c.req.query('container'))
     if (!brain) return c.json(denied, 403)
     const ok = await store.forget(brain, c.req.param('id'))
+    changed()
+    if (ok) emit({ type: 'del', brain, n: 1, text: '', what: 'memory' })
     return ok ? c.json({ ok: true }) : c.json({ error: 'not found' }, 404)
   })
 
@@ -200,6 +316,8 @@ export function createApp(store: MemoryStore, apiKeys: string[] = config.apiKeys
     const source = c.req.query('source')
     if (!source) return c.json({ error: 'source is required' }, 400)
     await store.forgetSource(brain, source)
+    changed()
+    emit({ type: 'del', brain, n: 0, text: snip(source), what: 'source' })
     return c.json({ ok: true })
   })
 
@@ -209,6 +327,8 @@ export function createApp(store: MemoryStore, apiKeys: string[] = config.apiKeys
     if (!brain) return c.json(denied, 403)
     if (c.req.query('confirm') !== brain) return c.json({ error: 'confirm must equal the brain name' }, 400)
     await store.clear(brain)
+    changed()
+    emit({ type: 'del', brain, n: 0, text: '', what: 'brain' })
     return c.json({ ok: true })
   })
 

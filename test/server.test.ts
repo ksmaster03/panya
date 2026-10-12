@@ -157,3 +157,60 @@ describe('นำข้อมูลเข้าออก', () => {
     expect((await call('POST', '/v1/import', 'admin-key', { brain: Y, memories: [{ text: 'ดี' }, { text: '' }] })).status).toBe(400)
   })
 })
+
+describe('อ่านทั้งชุดตาม subject', () => {
+  const json = async (r: Response | Promise<Response>) => (await r).json() as Promise<any>
+
+  test('เอกสารที่ตัดเป็นชิ้นถูกคืนตามลำดับ description, p1, p2, ... และ key ที่ผูกสมองอื่นอ่านไม่ได้', async () => {
+    const subject = 'claude-skill/user/demo/SKILL.md'
+    const parts = ['คำอธิบายของ skill ตัวอย่าง', ...Array.from({ length: 11 }, (_, i) => `ย่อหน้าที่ ${i + 1} ของ skill ตัวอย่าง`)]
+    const memories = parts.map((text, i) => ({ text, subject, attribute: i === 0 ? 'description' : `p${i}`, source: subject })).reverse()
+    expect((await call('POST', '/v1/memories/batch', 'admin-key', { brain: B, memories })).status).toBe(201)
+
+    const got = await json(call('GET', `/v1/memories?brain=${B}&subject=${encodeURIComponent(subject)}`, 'admin-key'))
+    expect(got.memories.map((m: any) => m.text)).toEqual(parts)
+
+    const list = await json(call('GET', `/v1/subjects?brain=${B}&prefix=claude-skill/`, 'admin-key'))
+    expect(list.subjects).toEqual([expect.objectContaining({ subject, count: 12, description: parts[0] })])
+    expect((await json(call('GET', `/v1/subjects?brain=${B}&prefix=nothing/`, 'admin-key'))).subjects).toEqual([])
+
+    expect((await call('GET', `/v1/memories?brain=${B}&subject=x`, 'a-key')).status).toBe(403)
+    expect((await call('GET', `/v1/subjects?brain=${B}`, 'a-key')).status).toBe(403)
+    expect((await call('GET', `/v1/memories?brain=${B}`, 'admin-key')).status).toBe(400)
+  })
+})
+
+describe('แดชบอร์ด', () => {
+  const json = async (r: Response | Promise<Response>) => (await r).json() as Promise<any>
+
+  test('สถิติรวมและเหตุการณ์สด: key ทั่วไปเห็นทุกสมอง · key ที่ผูกสมองเห็นเฉพาะของตัวเอง', async () => {
+    await call('POST', '/v1/memories', 'admin-key', { brain: A, text: 'ท่า D-11 เปิดใช้งานแล้ว' })
+    await call('POST', '/v1/memories', 'admin-key', { brain: B, text: 'tenant B ย้ายคลังไปอาคาร 3' })
+    await call('POST', '/v1/search', 'admin-key', { brain: A, q: 'ท่า D-11' })
+
+    const all = await json(call('GET', '/v1/overview', 'admin-key'))
+    const a = all.brains.find((b: any) => b.brain === A)
+    expect(all.brains.some((b: any) => b.brain === B)).toBe(true)
+    expect(a.live).toBeGreaterThanOrEqual(1)
+    expect(a.minute).toHaveLength(60)
+    expect(a.minute.reduce((x: number, y: number) => x + y, 0)).toBeGreaterThanOrEqual(1)
+    expect(all.searches.total).toBeGreaterThanOrEqual(1)
+    expect(all.server.startedAt).toBeGreaterThan(0)
+
+    const own = await json(call('GET', '/v1/overview', 'a-key'))
+    expect(own.brains.map((b: any) => b.brain)).toEqual([A])
+    expect(own.server).toBeUndefined()
+    expect(own.searches).toBeUndefined()
+
+    const ev = await json(call('GET', '/v1/events', 'admin-key'))
+    expect(ev.events.some((e: any) => e.type === 'in' && e.brain === B)).toBe(true)
+    expect(ev.events.some((e: any) => e.type === 'out' && e.brain === A)).toBe(true)
+    const mine = await json(call('GET', '/v1/events?after=0', 'a-key'))
+    expect(mine.events.length).toBeGreaterThan(0)
+    expect(mine.events.every((e: any) => e.brain === A)).toBe(true)
+    expect((await json(call('GET', `/v1/events?after=${ev.seq}`, 'admin-key'))).events).toEqual([])
+
+    expect((await call('GET', '/v1/overview', null)).status).toBe(401)
+    expect((await call('GET', '/v1/events', null)).status).toBe(401)
+  })
+})

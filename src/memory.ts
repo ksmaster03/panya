@@ -70,7 +70,33 @@ export interface Graph {
   edges: [number, number, number][]
 }
 
-export type RememberResult = { memory: Memory; action: 'created' | 'superseded' | 'merged' }
+/** สถิติของ brain หนึ่ง สำหรับหน้าแดชบอร์ด */
+export interface BrainStats {
+  brain: string
+  /** ความจำที่ยังใช้ได้ */
+  live: number
+  /** รุ่นเก่าที่ถูกค่าใหม่แทนแล้ว */
+  superseded: number
+  expired: number
+  /** ยังใช้ได้ แต่จะหมดอายุภายใน 7 วัน */
+  expiringSoon: number
+  kinds: Record<Kind, number>
+  /** มี subject + attribute */
+  keyed: number
+  sources: number
+  /** จำนวนครั้งที่ข้อความซ้ำถูกรวมเข้ารายการเดิม */
+  merges: number
+  /** จำนวนตัวอักษรรวมของความจำที่ยังใช้ได้ */
+  chars: number
+  firstAt: number
+  lastAt: number
+  /** จำนวนที่เขียนเข้ามา นับถอยหลังจากตอนนี้ ช่องสุดท้าย = ช่วงล่าสุด */
+  minute: number[]
+  hour: number[]
+  day: number[]
+}
+
+export type RememberResult ={ memory: Memory; action: 'created' | 'superseded' | 'merged' }
 
 type Meta = Record<string, string | number>
 const NEVER = 9_000_000_000_000_000
@@ -426,6 +452,41 @@ export class MemoryStore {
     return { nodes, edges }
   }
 
+  /**
+   * ความจำที่ยังใช้ได้ทั้งหมดของ subject เดียว เรียงตาม attribute: description ก่อน แล้ว p1, p2, ... ตามเลข
+   * ใช้ประกอบเอกสารที่ถูกตัดเป็นชิ้นกลับเป็นไฟล์เดิม
+   */
+  async bySubject(container: string, subject: string, now = Date.now()): Promise<Memory[]> {
+    const where: Where = { $and: [{ container }, { active: 1 }, { subject }, { validUntil: { $gt: now } }] }
+    const out: Memory[] = []
+    for (let offset = 0; ; offset += 1000) {
+      const r = await this.reader().get({ where, include: ['metadatas'], limit: 1000, offset })
+      r.ids.forEach((id, i) => out.push(toMemory(id, r.metadatas?.[i] as Meta)))
+      if (r.ids.length < 1000) break
+    }
+    const rank = (a: string) => (a === 'description' ? -1 : /^p\d+$/.test(a) ? Number(a.slice(1)) : Number.MAX_SAFE_INTEGER)
+    return out.sort((a, b) => rank(a.attribute) - rank(b.attribute) || a.attribute.localeCompare(b.attribute))
+  }
+
+  /** รายชื่อ subject ที่ขึ้นต้นด้วย prefix พร้อมจำนวนชิ้น และข้อความของ attribute "description" ถ้ามี */
+  async subjects(container: string, prefix = '', now = Date.now()) {
+    const by = new Map<string, { subject: string; count: number; description: string; source: string; updatedAt: number }>()
+    for (let offset = 0; ; offset += 1000) {
+      const r = await this.reader().get({ where: this.liveWhere(container, now), include: ['metadatas'], limit: 1000, offset })
+      r.ids.forEach((id, i) => {
+        const m = toMemory(id, r.metadatas?.[i] as Meta)
+        if (!m.subject || !m.subject.startsWith(prefix)) return
+        const e = by.get(m.subject) ?? { subject: m.subject, count: 0, description: '', source: m.source, updatedAt: 0 }
+        e.count++
+        e.updatedAt = Math.max(e.updatedAt, m.createdAt)
+        if (m.attribute === 'description') e.description = m.text
+        by.set(m.subject, e)
+      })
+      if (r.ids.length < 1000) break
+    }
+    return [...by.values()].sort((a, b) => a.subject.localeCompare(b.subject))
+  }
+
   /** ประวัติของคีย์หนึ่ง รวมรุ่นที่ถูกแทนแล้ว ใหม่สุดก่อน */
   async history(container: string, subject: string, attribute: string): Promise<Memory[]> {
     const r = await this.col.get({ where: { $and: [{ container }, { subject }, { attribute }] }, include: ['metadatas'] })
@@ -461,6 +522,49 @@ export class MemoryStore {
       if (r.ids.length < 1000) break
     }
     return n
+  }
+
+  /**
+   * สถิติของทุก brain ในรอบเดียว: อ่าน metadata ทั้ง collection แล้วนับในหน่วยความจำ
+   * การเขียนถูกนับจาก createdAt ของทุกรุ่น รวมรุ่นที่ถูกแทนแล้ว
+   */
+  async overview(now = Date.now()): Promise<BrainStats[]> {
+    const by = new Map<string, { s: BrainStats; sources: Set<string> }>()
+    const bump = (buckets: number[], age: number, size: number) => {
+      const i = Math.floor(age / size)
+      if (i >= 0 && i < buckets.length) buckets[buckets.length - 1 - i]!++
+    }
+    for (let offset = 0; ; offset += 1000) {
+      const r = await this.reader().get({ include: ['metadatas'], limit: 1000, offset })
+      r.ids.forEach((id, i) => {
+        const m = toMemory(id, r.metadatas?.[i] as Meta)
+        let e = by.get(m.container)
+        if (!e) {
+          const s: BrainStats = {
+            brain: m.container, live: 0, superseded: 0, expired: 0, expiringSoon: 0, kinds: { fact: 0, preference: 0, event: 0 },
+            keyed: 0, sources: 0, merges: 0, chars: 0, firstAt: m.createdAt, lastAt: m.createdAt,
+            minute: new Array(60).fill(0), hour: new Array(24).fill(0), day: new Array(30).fill(0),
+          }
+          by.set(m.container, (e = { s, sources: new Set() }))
+        }
+        const s = e.s
+        s.firstAt = Math.min(s.firstAt, m.createdAt)
+        s.lastAt = Math.max(s.lastAt, m.createdAt)
+        const age = now - m.createdAt
+        bump(s.minute, age, 60_000); bump(s.hour, age, 3_600_000); bump(s.day, age, 86_400_000)
+        if (!m.active) { s.superseded++; return }
+        if (m.validUntil && m.validUntil <= now) { s.expired++; return }
+        s.live++
+        if (m.validUntil && m.validUntil - now < 7 * 86_400_000) s.expiringSoon++
+        if (m.kind in s.kinds) s.kinds[m.kind]++
+        if (m.subject && m.attribute) s.keyed++
+        if (m.source) e.sources.add(m.source)
+        s.merges += Math.max(0, m.count - 1)
+        s.chars += m.text.length
+      })
+      if (r.ids.length < 1000) break
+    }
+    return [...by.values()].map(({ s, sources }) => ({ ...s, sources: sources.size })).sort((a, b) => b.live - a.live)
   }
 
   /** ลบความจำทั้งหมดที่มาจากแหล่งเดียวกัน (รวมรุ่นเก่า) ใช้ก่อนนำเข้าไฟล์เดิมซ้ำ */

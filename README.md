@@ -107,6 +107,25 @@ bun run import:claude-memory <folder> --brain my-notes
 
 Each file becomes several short memories (its description plus paragraph-sized chunks). Tokens and keys are replaced with `[redacted]` before storage. Re-running replaces what was imported from the same file. The data stays in your local seekdb.
 
+## Dashboard
+
+Open `http://127.0.0.1:6800/dashboard` and sign in with an API key. It shows every brain the key can reach: a 3D core with one orb per brain, memories flying in (writes) and out (searches) as they happen, a live feed, signal strips, write and search charts, and a sortable statistics table. Thai and English, switchable in the header. Data comes from `GET /v1/overview` (statistics, cached for five seconds) and `GET /v1/events` (the last 300 writes, searches and deletes that went through this server; kept in memory, so a restart clears them).
+
+## Claude Code skills
+
+`skills/` holds two example skills that let Claude Code on any machine share skills and memory through one panya server, over the HTTP API. Copy a folder into `~/.claude/skills/` and run its `setup` once:
+
+```bash
+node ~/.claude/skills/panya-memory/scripts/panya-memory.mjs setup --url http://<host>:6800 --key <api key>
+```
+
+| Skill | Send | Receive |
+|---|---|---|
+| `panya-skills` | `push` every `SKILL.md` and command into the `claude-skills` brain | `list`, `search`, `show <name>`, or `pull <name>` to install one locally |
+| `panya-memory` | `push` Claude Code memory files, or `remember "<fact>"` | `search "<question>"`, `list`, `show`, or `pull <project> --to <dir>` |
+
+Both need only Node 18+. Only `.md` files travel: a skill's scripts and assets are not sent. Documents are rebuilt from their chunks with `GET /v1/memories?brain=&subject=`; `GET /v1/subjects?brain=&prefix=` lists what is stored.
+
 ## How it decides
 
 1. Tokenise the query. Thai goes through `Intl.Segmenter`; codes are kept whole.

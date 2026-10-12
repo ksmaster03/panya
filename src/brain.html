@@ -76,36 +76,38 @@
 </head>
 <body>
 <header>
-  <h1><b>panya</b> <span>· สมองที่สอง</span></h1>
+  <h1><b>panya</b> <span data-i18n="subtitle"></span></h1>
   <form id="search">
-    <input id="q" placeholder="ถามความจำ เช่น ท่าไหนปิดซ่อม" autocomplete="off" aria-label="คำถาม">
-    <button class="primary" id="go">ค้น</button>
+    <input id="q" data-i18n-ph="qPh" data-i18n-aria="qAria" autocomplete="off">
+    <button class="primary" id="go" data-i18n="go"></button>
   </form>
   <div id="stats" role="status"></div>
-  <button id="export" type="button" hidden>ส่งออก</button>
-  <button id="logout" type="button" hidden>ออกจากระบบ</button>
+  <button id="lang" type="button"></button>
+  <button id="dash" type="button" data-i18n="dashboard" hidden></button>
+  <button id="export" type="button" data-i18n="export" hidden></button>
+  <button id="logout" type="button" data-i18n="signOut" hidden></button>
 </header>
 <main>
   <div id="stage">
-    <canvas id="c" aria-label="ภาพสมองสามมิติ แต่ละจุดคือความจำหนึ่งรายการ"></canvas>
+    <canvas id="c" data-i18n-aria="canvasAria"></canvas>
     <div id="tip"></div>
     <div id="hud">
-      <button id="spin" type="button" aria-pressed="true">หยุดหมุน</button>
-      <span>ลากเพื่อหมุน · ล้อเมาส์เพื่อซูม · แตะจุดเพื่ออ่านความจำ</span>
+      <button id="spin" type="button" aria-pressed="true"></button>
+      <span data-i18n="hint"></span>
     </div>
     <div id="gate">
       <form id="login">
-        <p>เข้าสู่ระบบด้วยชื่อสมอง (brain) และ API key ของสมองนั้น ทั้งสองค่าจะถูกจำไว้ในแท็บนี้เท่านั้น</p>
-        <input id="container" placeholder="ชื่อสมอง (brain)" autocomplete="username" aria-label="ชื่อสมอง" required>
+        <p data-i18n="gateHelp"></p>
+        <input id="container" data-i18n-ph="brainPh" data-i18n-aria="brainPh" autocomplete="username" required>
         <input id="key" type="password" placeholder="API key" autocomplete="current-password" aria-label="API key" required>
-        <button class="primary" id="enter">เข้าสู่ระบบ</button>
+        <button class="primary" id="enter" data-i18n="signIn"></button>
         <p id="err" role="alert"></p>
       </form>
     </div>
   </div>
   <aside>
-    <h2 id="side-title">ผลการค้น</h2>
-    <div id="hits" aria-live="polite"><p class="empty">พิมพ์คำถามด้านบน จุดที่เกี่ยวข้องจะสว่างขึ้นบนสมอง ชี้ที่จุดใดก็ได้เพื่ออ่านความจำนั้น</p></div>
+    <h2 id="side-title"></h2>
+    <div id="hits" aria-live="polite"></div>
     <div class="legend" id="legend"></div>
   </aside>
 </main>
@@ -115,6 +117,38 @@ const canvas = $('c'), ctx = canvas.getContext('2d')
 const PALETTE = ['#4fd1c5', '#f6b352', '#6aa9ff', '#f08aa8', '#a78bfa', '#7ddc8a', '#ffd166', '#5eead4', '#fca5a5', '#93c5fd']
 const AMBER = '#f6b352', TAU = Math.PI * 2
 const calm = matchMedia('(prefers-reduced-motion: reduce)').matches
+
+// ---------- สองภาษา ----------
+// ภาษาที่เลือกจำไว้ในเบราว์เซอร์และใช้ร่วมกับหน้า /dashboard · ค่าเป็นข้อความ หรือฟังก์ชันเมื่อมีตัวเลขแทรก
+const L = {
+  th: {
+    title: 'panya · สมองที่สอง', subtitle: '· สมองที่สอง', other: 'EN', otherAria: 'Switch to English',
+    qPh: 'ถามความจำ เช่น ท่าไหนปิดซ่อม', qAria: 'คำถาม', go: 'ค้น', searching: 'กำลังค้น…', dashboard: 'แดชบอร์ด', export: 'ส่งออก', exporting: 'กำลังส่งออก…',
+    signOut: 'ออกจากระบบ', signIn: 'เข้าสู่ระบบ', signingIn: 'กำลังเข้าสู่ระบบ…', brainPh: 'ชื่อสมอง (brain)',
+    canvasAria: 'ภาพสมองสามมิติ แต่ละจุดคือความจำหนึ่งรายการ', spinStop: 'หยุดหมุน', spinGo: 'หมุนต่อ', hint: 'ลากเพื่อหมุน · ล้อเมาส์เพื่อซูม · แตะจุดเพื่ออ่านความจำ',
+    gateHelp: 'เข้าสู่ระบบด้วยชื่อสมอง (brain) และ API key ของสมองนั้น ทั้งสองค่าจะถูกจำไว้ในแท็บนี้เท่านั้น',
+    results: 'ผลการค้น', resultsN: (n) => `ผลการค้น ${n} รายการ`, near: 'ความจำนี้และที่ใกล้เคียง', score: 'คะแนน',
+    intro: 'พิมพ์คำถามด้านบน จุดที่เกี่ยวข้องจะสว่างขึ้นบนสมอง ชี้ที่จุดใดก็ได้เพื่ออ่านความจำนั้น', typeAbove: 'พิมพ์คำถามด้านบน',
+    whyUnknown: 'ไม่ตอบ: คำถามนี้ถามถึงรายที่ไม่เคยปรากฏในความจำ', whyNoMatch: 'ไม่มีความจำที่เกี่ยวข้องพอ สมองเลือกตอบว่าไม่รู้',
+    emptyBrain: 'สมองนี้ยังไม่มีความจำ เก็บความจำแรกด้วย POST /v1/memories แล้วโหลดหน้านี้ใหม่',
+    stats: (n, e, b) => `${n} ความจำ · ${e} เส้นเชื่อม · ${b}`, badKey: 'API key ไม่ถูกต้อง', wrongBrain: 'key นี้ใช้กับสมองนี้ไม่ได้', serverSays: (n) => `เซิร์ฟเวอร์ตอบ ${n}`, raw: (m) => m,
+  },
+  en: {
+    title: 'panya · Second Brain', subtitle: '· Second Brain', other: 'ไทย', otherAria: 'เปลี่ยนเป็นภาษาไทย',
+    qPh: 'Ask the memory, e.g. which dock is closed', qAria: 'Question', go: 'Search', searching: 'Searching…', dashboard: 'Dashboard', export: 'Export', exporting: 'Exporting…',
+    signOut: 'Sign out', signIn: 'Sign in', signingIn: 'Signing in…', brainPh: 'Brain name',
+    canvasAria: '3D brain. Each point is one memory.', spinStop: 'Stop rotation', spinGo: 'Rotate', hint: 'Drag to rotate · scroll to zoom · tap a point to read the memory',
+    gateHelp: 'Sign in with a brain name and that brain’s API key. Both are remembered in this tab only.',
+    results: 'Search results', resultsN: (n) => `${n} search results`, near: 'This memory and its neighbours', score: 'Score',
+    intro: 'Type a question above. Matching points light up on the brain. Point at any dot to read that memory.', typeAbove: 'Type a question above',
+    whyUnknown: 'No answer: the question names something that never appears in this brain', whyNoMatch: 'No memory was relevant enough, so the brain chose to say it does not know',
+    emptyBrain: 'This brain has no memories yet. Store the first one with POST /v1/memories, then reload this page.',
+    stats: (n, e, b) => `${n} memories · ${e} links · ${b}`, badKey: 'That API key is not valid', wrongBrain: 'This key does not work for this brain', serverSays: (n) => `Server responded ${n}`, raw: (m) => m,
+  },
+}
+let lang = localStorage.getItem('panya.lang') || ((navigator.language || 'th').toLowerCase().startsWith('th') ? 'th' : 'en')
+const t = (k, ...a) => { const v = L[lang][k]; return typeof v === 'function' ? v(...a) : v }
+const loc = () => (lang === 'th' ? 'th-TH' : 'en-GB')
 
 let nodes = [], edges = [], neighbors = [], groups = [], lit = new Map(), litIdx = [], hover = -1, pinned = -1
 const cfg = { container: sessionStorage.getItem('panya.container') || new URLSearchParams(location.search).get('brain') || '', key: sessionStorage.getItem('panya.key') || '' }
@@ -390,7 +424,7 @@ function pick(ev) {
   return best
 }
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
-const when = (ms) => new Date(ms).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })
+const when = (ms) => new Date(ms).toLocaleDateString(loc(), { day: 'numeric', month: 'short', year: '2-digit' })
 const meta = (n) => `${esc(n.group)} · ${when(n.createdAt)}${n.source ? ' · ' + esc(n.source) : ''}`
 
 function showTip(ev) {
@@ -425,7 +459,7 @@ const endDrag = (ev) => {
   if (drag.moved || ev.type === 'pointercancel') return
   const i = pick(ev)
   pinned = i === pinned ? -1 : i
-  if (pinned >= 0) showList('ความจำนี้และที่ใกล้เคียง', [pinned, ...neighbors[pinned]].map((idx) => ({ idx })))
+  if (pinned >= 0) showList(['near'], [pinned, ...neighbors[pinned]].map((idx) => ({ idx })))
 }
 canvas.addEventListener('pointerup', endDrag)
 canvas.addEventListener('pointercancel', endDrag)
@@ -433,9 +467,9 @@ canvas.addEventListener('pointerleave', () => { if (!drag.on) { hover = -1; $('t
 canvas.addEventListener('wheel', (ev) => { ev.preventDefault(); cam.zoom = Math.max(0.6, Math.min(2.6, cam.zoom * Math.exp(-ev.deltaY * 0.0012))) }, { passive: false })
 $('spin').addEventListener('click', () => {
   cam.spin = !cam.spin
-  $('spin').textContent = cam.spin ? 'หยุดหมุน' : 'หมุนต่อ'; $('spin').setAttribute('aria-pressed', String(cam.spin))
+  $('spin').textContent = t(cam.spin ? 'spinStop' : 'spinGo'); $('spin').setAttribute('aria-pressed', String(cam.spin))
 })
-if (calm) { $('spin').textContent = 'หมุนต่อ'; $('spin').setAttribute('aria-pressed', 'false') }
+if (calm) $('spin').setAttribute('aria-pressed', 'false')
 
 // ---------- ข้อมูล ----------
 const api = async (path, body) => {
@@ -444,7 +478,7 @@ const api = async (path, body) => {
     headers: { authorization: 'Bearer ' + cfg.key, ...(body ? { 'content-type': 'application/json' } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   })
-  if (!res.ok) throw new Error(res.status === 401 ? 'API key ไม่ถูกต้อง' : res.status === 403 ? 'key นี้ใช้กับสมองนี้ไม่ได้' : 'เซิร์ฟเวอร์ตอบ ' + res.status)
+  if (!res.ok) throw new Error(res.status === 401 ? t('badKey') : res.status === 403 ? t('wrongBrain') : t('serverSays', res.status))
   return res.json()
 }
 // ปุ่มแสดงสถานะกำลังทำงานและกดซ้ำไม่ได้ระหว่างรอ
@@ -461,14 +495,17 @@ const groupOf = (n) => {
   return head && head.length <= 14 ? head.toLowerCase() : n.kind
 }
 
-function showList(title, items, emptyText) {
-  $('side-title').textContent = title
+// title และ empty เป็น [คีย์ข้อความ, ...ค่าแทรก] เก็บไว้ใน shown เพื่อวาดใหม่เมื่อสลับภาษา
+let shown = [['results'], [], ['intro']]
+function showList(title, items, empty) {
+  shown = [title, items, empty]
+  $('side-title').textContent = t(...title)
   $('hits').innerHTML = items.length
     ? items.map(({ idx, score }) => {
         const n = nodes[idx]
-        return `<div class="hit" data-i="${idx}" tabindex="0" role="button"><p>${esc(n.text)}</p><small>${score !== undefined ? 'คะแนน ' + score.toFixed(2) + ' · ' : ''}${meta(n)}</small></div>`
+        return `<div class="hit" data-i="${idx}" tabindex="0" role="button"><p>${esc(n.text)}</p><small>${score !== undefined ? t('score') + ' ' + score.toFixed(2) + ' · ' : ''}${meta(n)}</small></div>`
       }).join('')
-    : `<p class="empty">${esc(emptyText || '')}</p>`
+    : `<p class="empty">${esc(empty ? t(...empty) : '')}</p>`
   for (const el of $('hits').querySelectorAll('.hit')) {
     const i = Number(el.dataset.i)
     el.addEventListener('mouseenter', () => { hover = i })
@@ -484,18 +521,16 @@ $('search').addEventListener('submit', async (ev) => {
   ev.preventDefault()
   const q = $('q').value.trim()
   lit = new Map(); litIdx = []; pinned = -1
-  if (!q) return showList('ผลการค้น', [], 'พิมพ์คำถามด้านบน')
+  if (!q) return showList(['results'], [], ['typeAbove'])
   try {
-    const r = await busy($('go'), 'กำลังค้น…', () => api('/v1/search', { brain: cfg.container, q, limit: 8 }))
+    const r = await busy($('go'), t('searching'), () => api('/v1/search', { brain: cfg.container, q, limit: 8 }))
     const byId = new Map(nodes.map((n, i) => [n.id, i]))
     const items = r.hits.map((h) => ({ idx: byId.get(h.id), score: h.score })).filter((x) => x.idx !== undefined)
     for (const it of items) lit.set(it.idx, it.score)
     litIdx = [...lit.keys()]
     if (items.length && !calm) { surge = 1; for (let i = 0; i < 5; i++) spawnArc(T) }
-    showList(`ผลการค้น ${items.length} รายการ`, items, r.reason === 'unknown_entity'
-      ? 'ไม่ตอบ: คำถามนี้ถามถึงรายที่ไม่เคยปรากฏในความจำ'
-      : 'ไม่มีความจำที่เกี่ยวข้องพอ สมองเลือกตอบว่าไม่รู้')
-  } catch (e) { showList('ผลการค้น', [], e.message) }
+    showList(['resultsN', items.length], items, [r.reason === 'unknown_entity' ? 'whyUnknown' : 'whyNoMatch'])
+  } catch (e) { showList(['results'], [], ['raw', e.message]) }
 })
 
 async function open() {
@@ -509,19 +544,33 @@ async function open() {
   const color = new Map(groups.map(([name], i) => [name, PALETTE[i % PALETTE.length]]))
   for (const n of nodes) n.color = color.get(n.group)
   layout()
-  $('stats').textContent = `${nodes.length.toLocaleString()} ความจำ · ${edges.length.toLocaleString()} เส้นเชื่อม · ${cfg.container}`
+  opened = true; showStats()
   $('legend').innerHTML = groups.slice(0, 10).map(([name, c]) => `<span><i style="background:${color.get(name)};color:${color.get(name)}"></i>${esc(name)} ${c}</span>`).join('')
   $('gate').style.display = 'none'
-  $('export').hidden = false; $('logout').hidden = false
-  if (!nodes.length) showList('ผลการค้น', [], 'สมองนี้ยังไม่มีความจำ เก็บความจำแรกด้วย POST /v1/memories แล้วโหลดหน้านี้ใหม่')
+  $('dash').hidden = false; $('export').hidden = false; $('logout').hidden = false
+  if (!nodes.length) showList(['results'], [], ['emptyBrain'])
 }
+let opened = false
+const showStats = () => { if (opened) $('stats').textContent = t('stats', nodes.length.toLocaleString('en-US'), edges.length.toLocaleString('en-US'), cfg.container) }
+
+function applyLang() {
+  document.documentElement.lang = lang; document.title = t('title')
+  for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.dataset.i18n)
+  for (const el of document.querySelectorAll('[data-i18n-ph]')) el.placeholder = t(el.dataset.i18nPh)
+  for (const el of document.querySelectorAll('[data-i18n-aria]')) el.setAttribute('aria-label', t(el.dataset.i18nAria))
+  $('lang').textContent = t('other'); $('lang').setAttribute('aria-label', t('otherAria'))
+  $('spin').textContent = t(cam.spin ? 'spinStop' : 'spinGo')
+  $('err').textContent = ''
+  showStats(); showList(...shown)
+}
+$('lang').addEventListener('click', () => { lang = lang === 'th' ? 'en' : 'th'; localStorage.setItem('panya.lang', lang); applyLang() })
 
 $('login').addEventListener('submit', async (ev) => {
   ev.preventDefault()
   cfg.container = $('container').value.trim(); cfg.key = $('key').value.trim()
   $('err').textContent = ''
   try {
-    await busy($('enter'), 'กำลังเข้าสู่ระบบ…', open)
+    await busy($('enter'), t('signingIn'), open)
     sessionStorage.setItem('panya.container', cfg.container); sessionStorage.setItem('panya.key', cfg.key)
   } catch (e) { $('err').textContent = e.message }
 })
@@ -530,10 +579,11 @@ $('logout').addEventListener('click', () => {
   sessionStorage.removeItem('panya.container'); sessionStorage.removeItem('panya.key')
   location.href = location.pathname
 })
+$('dash').addEventListener('click', () => { location.href = '/dashboard' })
 // ส่งออกทั้งสมองเป็นไฟล์ JSON ที่นำกลับเข้าได้ด้วย POST /v1/import
 $('export').addEventListener('click', async () => {
   try {
-    const data = await busy($('export'), 'กำลังส่งออก…', () => api('/v1/export?brain=' + encodeURIComponent(cfg.container)))
+    const data = await busy($('export'), t('exporting'), () => api('/v1/export?brain=' + encodeURIComponent(cfg.container)))
     const a = document.createElement('a')
     a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' }))
     a.download = 'panya-' + cfg.container + '.json'
@@ -543,6 +593,7 @@ $('export').addEventListener('click', async () => {
 })
 
 $('container').value = cfg.container
+applyLang()
 window.addEventListener('resize', resize)
 resize(); requestAnimationFrame(frame)
 if (cfg.container && cfg.key) open().catch((e) => { $('err').textContent = e.message })
