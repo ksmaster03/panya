@@ -50,6 +50,19 @@ bun run eval        # retrieval quality on eval/dataset.json
 bun run bench       # speed
 ```
 
+## Start automatically on Windows
+
+`scripts/start-panya.ps1` starts Docker Desktop if it is not running, brings up the seekdb container, waits for it, then keeps `bun src/index.ts` running: after a crash it restarts 15 s later. Output goes to `logs/panya.log`.
+
+To run it at every logon without admin rights, put a small `.vbs` file in the Startup folder (Win+R, then `shell:startup`):
+
+```vbs
+Set WshShell = CreateObject("WScript.Shell")
+WshShell.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""<path-to-repo>\scripts\start-panya.ps1""", 0, False
+```
+
+It starts when you log on, not when the machine boots; Docker Desktop also needs a logged-in session. To stop panya, end the `powershell` launcher first and then `bun`, otherwise the launcher starts it again.
+
 ## Run with Docker
 
 `Dockerfile` builds the server with the embedding model baked in, so it needs no internet at start-up. `deploy/docker-compose.prod.yml` runs panya and seekdb beside an existing app on the same host: nothing is published to the host, the app reaches panya at `http://panya:6800` over its own Docker network, and both containers have memory caps.
