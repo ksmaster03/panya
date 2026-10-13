@@ -1,6 +1,7 @@
 import { SeekdbClient, Schema, FulltextIndexConfig, VectorIndexConfig, type Collection, type Where } from 'seekdb'
 import { config, type SearchTuning } from './config'
 import type { Embedder } from './embed'
+import type { Reranker } from './rerank'
 import { EntityRegistry, norm } from './entities'
 import { coverage, extractCodes, tokenize } from './tokenize'
 
@@ -43,10 +44,14 @@ export interface SearchHit extends Memory {
   score: number
   sim: number
   coverage: number
+  /** คะแนนจาก reranker (0-1) มีเมื่อการค้นครั้งนี้ถูกจัดอันดับซ้ำ */
+  rerank?: number
 }
 
 export interface SearchResult {
   hits: SearchHit[]
+  /** true = ผลชุดนี้ผ่าน reranker แล้ว */
+  reranked?: boolean
   /** true = ไม่มีความจำที่เกี่ยวพอ ผู้เรียกควรถือว่า "ไม่รู้" */
   abstained: boolean
   /** เหตุที่ไม่ตอบ: unknown_entity = คำค้นถามถึงรายที่ไม่มีในทะเบียนและไม่เคยปรากฏในความจำ */
@@ -129,6 +134,7 @@ export class MemoryStore {
     private embedder: Embedder,
     readonly entities: EntityRegistry,
     private readers: { client: SeekdbClient; col: Collection }[],
+    private reranker: Reranker | null,
   ) {}
 
   private next = 0
@@ -141,7 +147,7 @@ export class MemoryStore {
 
   static async open(
     embedder: Embedder,
-    opts: Partial<typeof config.seekdb> & { connectTimeoutMs?: number } = {},
+    opts: Partial<typeof config.seekdb> & { connectTimeoutMs?: number; reranker?: Reranker | null } = {},
   ): Promise<MemoryStore> {
     const c = { ...config.seekdb, ...opts }
     // seekdb ใช้เวลาบูตราวครึ่งนาที ถ้าเปิดพร้อมกันด้วย compose ต้องรอ ไม่ใช่ล้ม
@@ -177,7 +183,7 @@ export class MemoryStore {
       const rc = new SeekdbClient({ host: c.host, port: c.port, user: c.user, password: c.password, database: c.database })
       readers.push({ client: rc, col: await rc.getCollection({ name: c.collection, embeddingFunction: null }) })
     }
-    return new MemoryStore(client, col, embedder, await EntityRegistry.open(client), readers)
+    return new MemoryStore(client, col, embedder, await EntityRegistry.open(client), readers, opts.reranker ?? null)
   }
 
   async close() {
@@ -275,7 +281,7 @@ export class MemoryStore {
   async search(
     container: string,
     q: string,
-    opts: { limit?: number; now?: number; tuning?: Partial<SearchTuning> } = {},
+    opts: { limit?: number; now?: number; tuning?: Partial<SearchTuning>; rerank?: boolean; rerankTop?: number } = {},
   ): Promise<SearchResult> {
     const t = { ...config.search, ...opts.tuning }
     const now = opts.now ?? Date.now()
@@ -350,6 +356,18 @@ export class MemoryStore {
       hits.push({ ...toMemory(id, c.meta), score, sim: c.sim, coverage: cov })
     }
     hits.sort((a, b) => b.score - a.score || b.createdAt - a.createdAt)
+
+    // จัดอันดับซ้ำ: อ่านคำถามคู่กับข้อความจริงของผู้สมัครอันดับต้น แล้วผสมกับคะแนนเดิม
+    // ผู้สมัครที่ไม่ได้ส่งให้ reranker ถือว่าไม่ผ่าน และเกณฑ์ตัดใช้ rerankMinScore แทน minScore
+    if (this.reranker && opts.rerank !== false) {
+      const top = hits.slice(0, opts.rerankTop ?? config.rerank.top)
+      const rr = await this.reranker.score(q, top.map((h) => h.text))
+      const mixed = top.map((h, i) => ({ ...h, rerank: rr[i]!, score: (1 - t.rerankWeight) * h.score + t.rerankWeight * rr[i]! }))
+      mixed.sort((a, b) => b.score - a.score || b.createdAt - a.createdAt)
+      const kept = mixed.filter((h) => h.score >= t.rerankMinScore).slice(0, limit)
+      return kept.length ? { hits: kept, abstained: false, reranked: true } : { hits: [], abstained: true, reason: 'no_match', reranked: true }
+    }
+
     const kept = hits.filter((h) => h.score >= t.minScore).slice(0, limit)
     return kept.length ? { hits: kept, abstained: false } : { hits: [], abstained: true, reason: 'no_match' }
   }
@@ -572,8 +590,13 @@ export class MemoryStore {
     await this.col.delete({ where: { $and: [{ container }, { source }] } })
   }
 
+  /** ลบทีละชุดตาม id: คำสั่งลบทั้ง brain ในครั้งเดียวหมดเวลาที่ฐานข้อมูลเมื่อมีหลายพันรายการ */
   async clear(container: string) {
     await this.entities.clear(container)
-    await this.col.delete({ where: { container } })
+    for (;;) {
+      const r = await this.col.get({ where: { container }, include: [], limit: 500 })
+      if (!r.ids.length) break
+      await this.col.delete({ ids: [...r.ids] })
+    }
   }
 }

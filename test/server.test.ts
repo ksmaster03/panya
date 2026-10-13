@@ -213,4 +213,22 @@ describe('แดชบอร์ด', () => {
     expect((await call('GET', '/v1/overview', null)).status).toBe(401)
     expect((await call('GET', '/v1/events', null)).status).toBe(401)
   })
+
+  test('ไฟล์เสียง: เสิร์ฟเฉพาะชื่อที่อนุญาตใน src/assets และตอบ Range เป็นช่วง', async () => {
+    expect((await app.request('/assets/nothing-here.mp3')).status).toBe(404)
+    expect((await app.request('/assets/..%2Fserver.ts')).status).toBe(404)
+    expect((await app.request('/assets/Server.TS')).status).toBe(404)
+    const all = await app.request('/assets/mr-scratch.mp3')
+    // ไฟล์เพลงไม่ได้อยู่ใน repo เสมอไป: ตรวจ Range เฉพาะเมื่อมีไฟล์
+    if (all.status !== 200) return
+    const size = Number(all.headers.get('content-length'))
+    expect(all.headers.get('content-type')).toBe('audio/mpeg')
+    const part = await app.request('/assets/mr-scratch.mp3', { headers: { range: 'bytes=100-199' } })
+    expect(part.status).toBe(206)
+    expect(part.headers.get('content-range')).toBe(`bytes 100-199/${size}`)
+    expect((await part.arrayBuffer()).byteLength).toBe(100)
+    const tail = await app.request('/assets/mr-scratch.mp3', { headers: { range: 'bytes=-50' } })
+    expect(tail.headers.get('content-range')).toBe(`bytes ${size - 50}-${size - 1}/${size}`)
+    expect((await app.request('/assets/mr-scratch.mp3', { headers: { range: `bytes=${size + 5}-` } })).status).toBe(416)
+  })
 })

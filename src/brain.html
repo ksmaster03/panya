@@ -6,7 +6,7 @@
 <title>panya · สมองที่สอง</title>
 <style>
   :root {
-    --bg: #030814; --bg2: #0a1a38; --ink: #e8eef9; --muted: #9db0d0; --line: rgba(110, 170, 255, .22);
+    --bg: #030814; --bg2: #0a1a38; --ink: #e8eef9; --ink2: #c3cfe6; --muted: #9db0d0; --line: rgba(110, 170, 255, .22);
     --panel: rgba(8, 20, 44, .62); --field: rgba(6, 16, 36, .78);
     --teal: #4fd1c5; --amber: #f6b352; --blue: #6aa9ff; --rose: #ff9db6; --cyan: #7fe3ff;
     --r: 10px; --tap: 44px;
@@ -25,6 +25,14 @@
   h1 { font-size: 18px; margin: 0; font-weight: 600; white-space: nowrap; letter-spacing: .02em; }
   h1 b { color: var(--cyan); font-weight: 600; text-shadow: 0 0 14px rgba(127, 227, 255, .7); }
   h1 span { color: var(--muted); font-weight: 400; }
+  /* ข้อความไทยไม่ใช้ระยะห่างตัวอักษร: ทำให้สระและวรรณยุกต์เคลื่อน */
+  :lang(th) h1, :lang(th) aside h2 { letter-spacing: 0; }
+  /* แถบนำทางเหมือนกันทุกหน้า: หน้าปัจจุบันเป็นพื้นทึบ อีกหน้าเป็นเส้นขอบ */
+  .nav { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .nav a { display: inline-flex; align-items: center; min-height: var(--tap); padding: 0 14px; color: var(--ink); text-decoration: none; font-size: 14px; }
+  .nav a:hover { background: rgba(40, 104, 190, .35); }
+  .nav a[aria-current="page"] { background: rgba(57, 135, 229, .45); font-weight: 600; }
+  .nav a:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; }
   form { display: flex; gap: 8px; flex: 1 1 320px; min-width: 0; }
   input, button {
     font: inherit; color: var(--ink); background: var(--field); border: 1px solid var(--line); border-radius: var(--r);
@@ -36,8 +44,9 @@
   button { cursor: pointer; background: rgba(28, 74, 140, .55); white-space: nowrap; transition: background .15s, box-shadow .15s; }
   button:hover { background: rgba(40, 104, 190, .7); box-shadow: 0 0 16px rgba(106, 169, 255, .35); }
   button:disabled { opacity: .6; cursor: progress; }
-  button.primary { background: linear-gradient(180deg, rgba(64, 150, 230, .9), rgba(34, 96, 180, .9)); border-color: rgba(127, 227, 255, .5); }
-  #stats { color: var(--muted); font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  button.primary { background: linear-gradient(180deg, rgb(34, 104, 190), rgb(24, 78, 152)); border-color: rgba(127, 227, 255, .5); }
+  /* จำนวนความจำอยู่บนเวทีเดียวกับสมอง ไม่กินแถวของหัวหน้าบนมือถือ */
+  #stats { position: absolute; left: 14px; top: 10px; right: 14px; pointer-events: none; color: var(--ink2); font-size: 13px; font-variant-numeric: tabular-nums; }
   main { display: grid; grid-template-columns: 1fr 340px; min-height: 0; }
   #stage { position: relative; min-height: 0; overflow: hidden; }
   canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
@@ -57,7 +66,10 @@
     padding: 9px 11px; font-size: 13px; display: none; box-shadow: 0 8px 28px rgba(0, 0, 0, .55), 0 0 18px rgba(106, 169, 255, .25); overflow-wrap: anywhere;
   }
   #tip small { color: var(--muted); display: block; margin-top: 4px; }
-  #hud { position: absolute; left: 14px; bottom: 12px; display: flex; gap: 10px; align-items: center; font-size: 12px; color: var(--muted); pointer-events: none; }
+  #hud .grow { flex: 1 1 auto; }
+  /* มือถือ: แถวแรกเป็นชื่อ แถบนำทาง และปุ่มภาษา แถวที่สองเป็นช่องค้นเต็มความกว้าง */
+  @media (max-width: 820px) { h1 span { display: none; } header { gap: 8px; padding: 8px 12px; } #search { order: 9; flex-basis: 100%; } #lang { margin-left: auto; } }
+  #hud { position: absolute; left: 14px; right: 14px; bottom: 12px; display: flex; gap: 10px; align-items: center; font-size: 12px; color: var(--muted); pointer-events: none; }
   #hud button { pointer-events: auto; font-size: 12px; padding: 4px 12px; min-height: var(--tap); }
   #gate { position: absolute; inset: 0; display: grid; place-items: center; background: radial-gradient(closest-side, rgba(3, 8, 20, .35), rgba(3, 8, 20, .78)); padding: 16px; }
   #gate form {
@@ -77,23 +89,24 @@
 <body>
 <header>
   <h1><b>panya</b> <span data-i18n="subtitle"></span></h1>
+  <nav class="nav" data-i18n-aria="navAria"><a href="/brain" aria-current="page" data-i18n="navBrain"></a><a href="/dashboard" data-i18n="dashboard"></a></nav>
   <form id="search">
     <input id="q" data-i18n-ph="qPh" data-i18n-aria="qAria" autocomplete="off">
     <button class="primary" id="go" data-i18n="go"></button>
   </form>
-  <div id="stats" role="status"></div>
   <button id="lang" type="button"></button>
-  <button id="dash" type="button" data-i18n="dashboard" hidden></button>
-  <button id="export" type="button" data-i18n="export" hidden></button>
-  <button id="logout" type="button" data-i18n="signOut" hidden></button>
 </header>
 <main>
   <div id="stage">
     <canvas id="c" data-i18n-aria="canvasAria"></canvas>
+    <div id="stats" role="status"></div>
     <div id="tip"></div>
     <div id="hud">
       <button id="spin" type="button" aria-pressed="true"></button>
       <span data-i18n="hint"></span>
+      <i class="grow"></i>
+      <button id="export" type="button" data-i18n="export" hidden></button>
+      <button id="logout" type="button" data-i18n="signOut" hidden></button>
     </div>
     <div id="gate">
       <form id="login">
@@ -122,7 +135,7 @@ const calm = matchMedia('(prefers-reduced-motion: reduce)').matches
 // ภาษาที่เลือกจำไว้ในเบราว์เซอร์และใช้ร่วมกับหน้า /dashboard · ค่าเป็นข้อความ หรือฟังก์ชันเมื่อมีตัวเลขแทรก
 const L = {
   th: {
-    title: 'panya · สมองที่สอง', subtitle: '· สมองที่สอง', other: 'EN', otherAria: 'Switch to English',
+    title: 'panya · สมองที่สอง', subtitle: '· สมองที่สอง', other: 'EN', otherAria: 'Switch to English', navAria: 'หน้าหลัก', navBrain: 'สมอง',
     qPh: 'ถามความจำ เช่น ท่าไหนปิดซ่อม', qAria: 'คำถาม', go: 'ค้น', searching: 'กำลังค้น…', dashboard: 'แดชบอร์ด', export: 'ส่งออก', exporting: 'กำลังส่งออก…',
     signOut: 'ออกจากระบบ', signIn: 'เข้าสู่ระบบ', signingIn: 'กำลังเข้าสู่ระบบ…', brainPh: 'ชื่อสมอง (brain)',
     canvasAria: 'ภาพสมองสามมิติ แต่ละจุดคือความจำหนึ่งรายการ', spinStop: 'หยุดหมุน', spinGo: 'หมุนต่อ', hint: 'ลากเพื่อหมุน · ล้อเมาส์เพื่อซูม · แตะจุดเพื่ออ่านความจำ',
@@ -134,7 +147,7 @@ const L = {
     stats: (n, e, b) => `${n} ความจำ · ${e} เส้นเชื่อม · ${b}`, badKey: 'API key ไม่ถูกต้อง', wrongBrain: 'key นี้ใช้กับสมองนี้ไม่ได้', serverSays: (n) => `เซิร์ฟเวอร์ตอบ ${n}`, raw: (m) => m,
   },
   en: {
-    title: 'panya · Second Brain', subtitle: '· Second Brain', other: 'ไทย', otherAria: 'เปลี่ยนเป็นภาษาไทย',
+    title: 'panya · Second Brain', subtitle: '· Second Brain', other: 'ไทย', otherAria: 'เปลี่ยนเป็นภาษาไทย', navAria: 'Main pages', navBrain: 'Brain',
     qPh: 'Ask the memory, e.g. which dock is closed', qAria: 'Question', go: 'Search', searching: 'Searching…', dashboard: 'Dashboard', export: 'Export', exporting: 'Exporting…',
     signOut: 'Sign out', signIn: 'Sign in', signingIn: 'Signing in…', brainPh: 'Brain name',
     canvasAria: '3D brain. Each point is one memory.', spinStop: 'Stop rotation', spinGo: 'Rotate', hint: 'Drag to rotate · scroll to zoom · tap a point to read the memory',
@@ -547,7 +560,7 @@ async function open() {
   opened = true; showStats()
   $('legend').innerHTML = groups.slice(0, 10).map(([name, c]) => `<span><i style="background:${color.get(name)};color:${color.get(name)}"></i>${esc(name)} ${c}</span>`).join('')
   $('gate').style.display = 'none'
-  $('dash').hidden = false; $('export').hidden = false; $('logout').hidden = false
+  $('export').hidden = false; $('logout').hidden = false
   if (!nodes.length) showList(['results'], [], ['emptyBrain'])
 }
 let opened = false
@@ -579,7 +592,6 @@ $('logout').addEventListener('click', () => {
   sessionStorage.removeItem('panya.container'); sessionStorage.removeItem('panya.key')
   location.href = location.pathname
 })
-$('dash').addEventListener('click', () => { location.href = '/dashboard' })
 // ส่งออกทั้งสมองเป็นไฟล์ JSON ที่นำกลับเข้าได้ด้วย POST /v1/import
 $('export').addEventListener('click', async () => {
   try {

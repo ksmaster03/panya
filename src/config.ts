@@ -18,8 +18,19 @@ export const config = {
     model: process.env.PANYA_EMBED_MODEL ?? 'Xenova/multilingual-e5-small',
     dimension: num(process.env.PANYA_EMBED_DIM, 384),
   },
+  // จัดอันดับซ้ำด้วย cross-encoder ตัวเล็ก: ให้คะแนนความเกี่ยวข้องของคู่ (คำถาม, ความจำ) ไม่เขียนหรือแก้ข้อความ
+  // ปิดเป็นค่าตั้งต้น เพราะเพิ่มเวลาค้นหลักร้อยมิลลิวินาทีบน CPU · เปิดด้วย PANYA_RERANK=1
+  rerank: {
+    enabled: process.env.PANYA_RERANK === '1',
+    model: process.env.PANYA_RERANK_MODEL ?? 'onnx-community/bge-reranker-v2-m3-ONNX',
+    // จำนวนผู้สมัครอันดับต้น (ตามคะแนนเดิม) ที่ส่งให้จัดอันดับซ้ำ เวลาที่ใช้เพิ่มตามจำนวนนี้
+    top: num(process.env.PANYA_RERANK_TOP, 10),
+  },
   search: {
     // ค่าเหล่านี้ปรับจากชุดทดสอบ (bun run eval) อย่าเดา
+    // ใช้เมื่อเปิด reranker: คะแนนสุดท้าย = (1 - rerankWeight) * คะแนนเดิม + rerankWeight * คะแนน reranker
+    rerankWeight: num(process.env.PANYA_RERANK_WEIGHT, 0.7),
+    rerankMinScore: num(process.env.PANYA_RERANK_MIN_SCORE, 0.2),
     minScore: num(process.env.PANYA_MIN_SCORE, 0.3),
     simFloor: num(process.env.PANYA_SIM_FLOOR, 0.82),
     simCeil: num(process.env.PANYA_SIM_CEIL, 0.9),

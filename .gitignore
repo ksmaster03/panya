@@ -3,3 +3,10 @@ node_modules/
 .env
 *.log
 eval/.baseline-map*.json
+.env.local
+*.pem
+*.key
+*accessKeys*.csv
+logs/
+dist/
+build/

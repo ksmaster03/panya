@@ -27,6 +27,24 @@ export function createApp(store: MemoryStore, apiKeys: string[] = config.apiKeys
   // หน้าแดชบอร์ดรวมทุก brain: ข้อมูลมาจาก /v1/overview ซึ่งต้องมี key เช่นกัน
   app.get('/dashboard', async (c) => c.html(await Bun.file(new URL('./dashboard.html', import.meta.url)).text()))
 
+  // ไฟล์เสียงประกอบของหน้าแดชบอร์ด: เฉพาะไฟล์ใน src/assets และเฉพาะชื่อที่เป็นตัวพิมพ์เล็ก ตัวเลข ขีดกลาง
+  // รองรับ Range เพื่อให้เบราว์เซอร์เลื่อนตำแหน่งเพลงและเล่นวนได้
+  const AUDIO = { mp3: 'audio/mpeg', ogg: 'audio/ogg', wav: 'audio/wav' } as const
+  app.get('/assets/:file', async (c) => {
+    const m = c.req.param('file').match(/^[a-z0-9-]+\.(mp3|ogg|wav)$/)
+    if (!m) return c.notFound()
+    const file = Bun.file(new URL('./assets/' + m[0], import.meta.url))
+    if (!(await file.exists())) return c.notFound()
+    const headers = { 'content-type': AUDIO[m[1] as keyof typeof AUDIO], 'accept-ranges': 'bytes', 'cache-control': 'public, max-age=86400' }
+    const range = c.req.header('range')?.match(/^bytes=(\d*)-(\d*)$/)
+    if (!range || (!range[1] && !range[2])) return new Response(file, { headers: { ...headers, 'content-length': String(file.size) } })
+    // "a-b" = ช่วง, "a-" = ตั้งแต่ a ถึงท้าย, "-n" = n ไบต์สุดท้าย
+    const start = range[1] ? Number(range[1]) : Math.max(0, file.size - Number(range[2]))
+    const end = range[1] && range[2] ? Math.min(Number(range[2]), file.size - 1) : file.size - 1
+    if (start > end) return new Response(null, { status: 416, headers: { 'content-range': `bytes */${file.size}` } })
+    return new Response(file.slice(start, end + 1), { status: 206, headers: { ...headers, 'content-range': `bytes ${start}-${end}/${file.size}`, 'content-length': String(end - start + 1) } })
+  })
+
   // ── ตัวนับการใช้งาน ───────────────────────────────────────────────
   // อยู่ในหน่วยความจำของ process นี้ รีสตาร์ตแล้วเริ่มนับใหม่ · วงแหวน 60 ช่อง ช่องละหนึ่งนาที
   const startedAt = Date.now()
@@ -163,7 +181,8 @@ export function createApp(store: MemoryStore, apiKeys: string[] = config.apiKeys
     // minScore ให้ผู้เรียกปรับความเข้มของการไม่ตอบได้ ถ้าเนื้อหาต่างจากที่เกณฑ์ตั้งต้นถูกปรับมา
     const tuning = typeof b.minScore === 'number' && b.minScore >= 0 && b.minScore <= 1 ? { minScore: b.minScore } : undefined
     const t0 = performance.now()
-    const r = await store.search(brain, b.q, { limit, tuning })
+    // rerank: false = ข้าม reranker สำหรับคำขอนี้ (เมื่อผู้เรียกต้องการความเร็วมากกว่าความแม่น)
+    const r = await store.search(brain, b.q, { limit, tuning, rerank: b.rerank === false ? false : undefined })
     const ms = Math.round(performance.now() - t0)
     recordSearch(ms, r.abstained)
     emit({ type: 'out', brain, n: r.hits.length, text: snip(b.q), hits: r.hits.length, abstained: r.abstained, reason: r.reason, ms })

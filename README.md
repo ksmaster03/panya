@@ -47,8 +47,11 @@ bun run dev                   # http://127.0.0.1:6800
 bun run test        # needs seekdb running
 bun run typecheck
 bun run eval        # retrieval quality on eval/dataset.json
+bun eval/run.ts --rerank --haystack <brain>[:<count>]   # same, with the reranker and real memories as distractors
 bun run bench       # speed
 ```
+
+`--haystack <brain>[:<count>]` mixes real memories from one of your brains into the eval as distractors. They are read from the database at run time and removed afterwards; they are never written to a file.
 
 ## Start automatically on Windows
 
@@ -84,7 +87,7 @@ Every route under `/v1` needs `Authorization: Bearer <key>`.
 |---|---|
 | `POST /v1/memories` | Store `{ brain, text, subject?, attribute?, kind?, validUntil?, source?, ref? }` |
 | `POST /v1/memories/batch` | Store up to 200 at once: `{ brain, memories: [...] }`. All-or-nothing validation |
-| `POST /v1/search` | `{ brain, q, limit?, minScore? }` returns `{ hits, abstained, reason? }` |
+| `POST /v1/search` | `{ brain, q, limit?, minScore?, rerank? }` returns `{ hits, abstained, reason? }`. `rerank: false` skips the optional reranker for this request |
 | `GET /v1/graph?brain=` | Nodes with 2D positions and nearest-neighbour edges, for the brain view |
 | `GET /v1/profile?brain=` | Preferences, keyed facts and recent items |
 | `PUT /v1/entities` | Register names: `{ brain, type, cues, names }` |
@@ -124,6 +127,8 @@ Each file becomes several short memories (its description plus paragraph-sized c
 
 Open `http://127.0.0.1:6800/dashboard` and sign in with an API key. It shows every brain the key can reach: a 3D core with one orb per brain, memories flying in (writes) and out (searches) as they happen, a live feed, signal strips, write and search charts, and a sortable statistics table. Thai and English, switchable in the header. Data comes from `GET /v1/overview` (statistics, cached for five seconds) and `GET /v1/events` (the last 300 writes, searches and deletes that went through this server; kept in memory, so a restart clears them).
 
+A sound bar sits at the bottom of the dashboard: play/pause, a waveform of the whole track that you click to seek, live frequency bars, and volume. It plays `src/assets/mr-scratch.mp3`, served at `GET /assets/<file>` (only mp3, ogg and wav files in `src/assets`, with Range support). The audio file is not included in the repository: put your own file at that path.
+
 ## Claude Code skills
 
 `skills/` holds two example skills that let Claude Code on any machine share skills and memory through one panya server, over the HTTP API. Copy a folder into `~/.claude/skills/` and run its `setup` once:
@@ -148,6 +153,34 @@ Both need only Node 18+. Only `.md` files travel: a skill's scripts and assets a
 5. Score each candidate from normalised similarity and the share of query words it contains. Anything under `minScore` is discarded. No survivors means `abstained: true`.
 
 Thresholds live in `src/config.ts` and come from `bun run eval`, which tunes on half the questions and reports on the other half.
+
+## Reranker (optional)
+
+A small cross-encoder (`onnx-community/bge-reranker-v2-m3-ONNX`, run through transformers.js like the embedder) can score each (question, memory) pair among the top candidates and blend that with the existing score. It only scores; it never writes or rewrites text.
+
+It is off by default.
+
+- `PANYA_RERANK=1` turns it on.
+- `PANYA_RERANK_TOP` (default 10) is how many top candidates are rescored.
+- `PANYA_RERANK_WEIGHT` (default 0.7) and `PANYA_RERANK_MIN_SCORE` (default 0.2) control the blend and the cut-off.
+- A request can skip it with `"rerank": false` in `POST /v1/search`. The response has `"reranked": true` when it ran.
+- For Docker, `--build-arg BAKE_RERANKER=1` bakes the model (about 570 MB) into the image.
+
+Measured on 12 October 2026 on a laptop CPU (Intel i7-1165G7, no discrete GPU). The eval set was 100 synthetic Thai memories plus 7,088 real memories as distractors, with 120 questions.
+
+| Setup | Correct at rank 1 | Abstains when no answer exists | Search time (mean) |
+|---|---|---|---|
+| Default thresholds | 82% | 60% | 81 ms |
+| Re-tuned thresholds, no reranker (`lexWeight=0.5 simFloor=0.84 simCeil=0.9 minScore=0.4`) | 79% | 90% | 81 ms |
+| Reranker, top 5 | 82% | 95% | 1,700 ms (p95 4,300 ms) |
+
+The first row is all 120 questions with the shipped defaults. The other two rows are the 60 held-out questions after tuning on the other 60.
+
+Read this honestly: on a CPU, most of the gain is available for free by re-tuning the thresholds on your own data. The reranker adds a few points at a large latency cost, so it is worth it mainly with a GPU or when queries are rare.
+
+Two smaller rerankers were tried and rejected: `Xenova/bge-reranker-base` dropped Thai rank-1 accuracy to 72%, and `gte-multilingual-reranker-base` does not load in transformers.js.
+
+Reproduce: `bun eval/run.ts --rerank --haystack <brain>[:<count>]`.
 
 ## Results
 
@@ -183,6 +216,7 @@ Memory: about 1 GB RSS for the panya process; seekdb documents a 2 GB minimum.
 
 - Paraphrases far from the stored wording are missed (67% correct at rank 1 on paraphrased questions).
 - In-domain questions with no answer are still answered about one time in four, for example a question about a carrier's fleet size returns other facts about that carrier.
+- With thousands of memories in one brain the shipped thresholds answer too readily: correct abstention fell to 60% with 7,088 distractors. Re-tune them with the haystack eval.
 - Bare numbers and single letters ("gate 5", "zone Z") are not treated as identifiers.
 - It cannot summarise. Send one short fact per memory, 2000 characters at most.
 - seekdb embedded mode hung on Windows under both Bun and Node (tested 7 October 2026). Use the Docker server.
