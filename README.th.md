@@ -1,4 +1,4 @@
-# panya (ปัญญา)
+# panya (ปั้นหยา)
 
 [English](README.md) · **ภาษาไทย**
 

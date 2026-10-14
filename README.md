@@ -4,7 +4,7 @@
 
 ![A robot head linked to a second brain made of index cards and small databases](docs/panya-hero.jpg)
 
-**panya** (ปัญญา, "wisdom") is a second brain for AI apps: a memory service that stores facts, finds them again, and says "I don't know" when it has nothing relevant. It does this **without calling an LLM**, so it never rewrites what you stored and never invents a detail.
+**panya** (ปั้นหยา) is a second brain for AI apps: a memory service that stores facts, finds them again, and says "I don't know" when it has nothing relevant. It does this **without calling an LLM**, so it never rewrites what you stored and never invents a detail.
 
 Built for Thai and English text. Runs on Bun, TypeScript and [seekdb](https://github.com/oceanbase/seekdb).
 
