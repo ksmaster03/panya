@@ -3,6 +3,7 @@ import { config, type SearchTuning } from './config'
 import type { Embedder } from './embed'
 import type { Reranker } from './rerank'
 import { EntityRegistry, norm } from './entities'
+import { UserRegistry } from './users'
 import { coverage, extractCodes, tokenize } from './tokenize'
 
 export type Kind = 'fact' | 'preference' | 'event'
@@ -135,6 +136,7 @@ export class MemoryStore {
     readonly entities: EntityRegistry,
     private readers: { client: SeekdbClient; col: Collection }[],
     private reranker: Reranker | null,
+    readonly users: UserRegistry,
   ) {}
 
   private next = 0
@@ -183,7 +185,7 @@ export class MemoryStore {
       const rc = new SeekdbClient({ host: c.host, port: c.port, user: c.user, password: c.password, database: c.database })
       readers.push({ client: rc, col: await rc.getCollection({ name: c.collection, embeddingFunction: null }) })
     }
-    return new MemoryStore(client, col, embedder, await EntityRegistry.open(client), readers, opts.reranker ?? null)
+    return new MemoryStore(client, col, embedder, await EntityRegistry.open(client), readers, opts.reranker ?? null, await UserRegistry.open(client))
   }
 
   async close() {
@@ -503,6 +505,81 @@ export class MemoryStore {
       if (r.ids.length < 1000) break
     }
     return [...by.values()].sort((a, b) => a.subject.localeCompare(b.subject))
+  }
+
+  /**
+   * ตำแหน่ง 2 มิติของความจำที่ยังใช้ได้ "ทุกรายการ" ของ brain จาก PCA ของ embedding ทั้งชุด (graph() ใช้แค่ตัวอย่าง)
+   * เส้นเชื่อมเพื่อนบ้านคิดเฉพาะในตัวอย่างที่กระจายทั่วชุด ไม่เกิน edgeSample รายการ เพราะทั้งชุดเป็น O(n²)
+   */
+  async points(container: string, opts: { edgeSample?: number; neighbors?: number; now?: number } = {}) {
+    const where = this.liveWhere(container, opts.now ?? Date.now())
+    const metas: Memory[] = [], vecs: Float32Array[] = []
+    for (let offset = 0; ; offset += 1000) {
+      const r = await this.reader().get({ where, include: ['metadatas', 'embeddings'], limit: 1000, offset })
+      r.ids.forEach((id, i) => {
+        const v = r.embeddings?.[i]
+        if (!v || !v.length) return
+        metas.push(toMemory(id, r.metadatas?.[i] as Meta))
+        vecs.push(Float32Array.from(v))
+      })
+      if (r.ids.length < 1000) break
+    }
+    const n = metas.length, dim = vecs[0]?.length ?? 0
+    if (n < 2 || !dim) return { metas, xs: metas.map(() => 0), ys: metas.map(() => 0), edges: [] as [number, number, number][] }
+
+    const mean = new Float64Array(dim)
+    for (const v of vecs) for (let d = 0; d < dim; d++) mean[d]! += v[d]! / n
+    const project = (axis: Float64Array) => {
+      const out = new Float64Array(n)
+      for (let i = 0; i < n; i++) { const v = vecs[i]!; let s = 0; for (let d = 0; d < dim; d++) s += (v[d]! - mean[d]!) * axis[d]!; out[i] = s }
+      return out
+    }
+    // power iteration ลู่เข้าเร็ว: ชุดใหญ่ใช้รอบน้อยลงเพื่อให้คำนวณทั้งชุดได้ในไม่กี่วินาที
+    const rounds = n > 5000 ? 20 : 40
+    const component = (deflate?: Float64Array) => {
+      let axis = Float64Array.from({ length: dim }, (_, d) => Math.sin(d * 12.9898 + (deflate ? 1 : 0)))
+      for (let it = 0; it < rounds; it++) {
+        const scores = project(axis), next = new Float64Array(dim)
+        for (let i = 0; i < n; i++) { const v = vecs[i]!, s = scores[i]!; for (let d = 0; d < dim; d++) next[d]! += (v[d]! - mean[d]!) * s }
+        if (deflate) { let dot = 0; for (let d = 0; d < dim; d++) dot += next[d]! * deflate[d]!; for (let d = 0; d < dim; d++) next[d]! -= dot * deflate[d]! }
+        let len = 0; for (let d = 0; d < dim; d++) len += next[d]! * next[d]!
+        len = Math.sqrt(len) || 1
+        for (let d = 0; d < dim; d++) next[d]! /= len
+        axis = next
+      }
+      return axis
+    }
+    const a1 = component(), xs = project(a1), ys = project(component(a1))
+
+    // เพื่อนบ้านในตัวอย่างที่เลือกแบบเว้นระยะเท่ากัน (ไม่สุ่ม ผลจึงคงที่ระหว่างการคำนวณ)
+    const k = opts.neighbors ?? 2, s = Math.min(n, opts.edgeSample ?? 1200)
+    const sample = Array.from({ length: s }, (_, i) => Math.floor((i * n) / s))
+    const edges: [number, number, number][] = [], seen = new Set<string>()
+    for (const i of sample) {
+      const best: [number, number][] = [], vi = vecs[i]!
+      for (const j of sample) {
+        if (i === j) continue
+        const vj = vecs[j]!
+        let sim = 0
+        for (let d = 0; d < dim; d++) sim += vi[d]! * vj[d]!
+        if (best.length < k) { best.push([j, sim]); best.sort((p, q) => q[1] - p[1]) }
+        else if (sim > best[k - 1]![1]) { best[k - 1] = [j, sim]; best.sort((p, q) => q[1] - p[1]) }
+      }
+      for (const [j, sim] of best) {
+        const key = i < j ? `${i}-${j}` : `${j}-${i}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        edges.push([i, j, Math.round(sim * 1000) / 1000])
+      }
+    }
+    return { metas, xs: Array.from(xs), ys: Array.from(ys), edges }
+  }
+
+  /** ความจำหนึ่งรายการตาม id เฉพาะเมื่ออยู่ใน container ที่ระบุ */
+  async getOne(container: string, id: string): Promise<Memory | null> {
+    const r = await this.reader().get({ ids: id, include: ['metadatas'] })
+    const m = r.metadatas?.[0] as Meta | undefined
+    return r.ids.length && m && m.container === container ? toMemory(r.ids[0]!, m) : null
   }
 
   /** ประวัติของคีย์หนึ่ง รวมรุ่นที่ถูกแทนแล้ว ใหม่สุดก่อน */

@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>panya · เข้าสู่ระบบ</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #030814; --bg2: #0a1a38; --ink: #e8eef9; --ink2: #c3cfe6; --muted: #9db0d0;
+    --line: rgba(110, 170, 255, .22); --panel: rgba(8, 20, 44, .78); --field: rgba(6, 16, 36, .78); --cyan: #7fe3ff; --crit: #ff8a8a;
+    --tap: 44px;
+  }
+  * { box-sizing: border-box; }
+  html, body { min-height: 100%; margin: 0; }
+  body {
+    display: grid; place-items: center; min-height: 100vh; padding: 16px;
+    background: radial-gradient(900px 600px at 50% 10%, var(--bg2), var(--bg) 70%) fixed; background-color: var(--bg);
+    color: var(--ink); font-family: "Leelawadee UI", "Noto Sans Thai", Sarabun, Tahoma, system-ui, sans-serif; line-height: 1.7;
+  }
+  form { display: flex; flex-direction: column; gap: 10px; width: min(380px, 100%); padding: 24px; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); box-shadow: 0 0 60px rgba(57, 135, 229, .18); }
+  h1 { margin: 0; font-size: 22px; font-weight: 600; }
+  h1 b { color: var(--cyan); font-weight: 600; text-shadow: 0 0 14px rgba(127, 227, 255, .7); }
+  p { margin: 0; color: var(--muted); font-size: 14px; }
+  label { font-size: 14px; color: var(--ink2); }
+  input, button { font: inherit; color: var(--ink); background: var(--field); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; min-height: var(--tap); width: 100%; }
+  input:focus, button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 1px; }
+  button { cursor: pointer; margin-top: 6px; background: linear-gradient(180deg, rgb(34, 104, 190), rgb(24, 78, 152)); border-color: rgba(127, 227, 255, .5); }
+  button:disabled { opacity: .6; cursor: progress; }
+  #err { color: var(--crit); min-height: 1.7em; }
+  .top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  #lang { width: auto; margin: 0; min-height: 36px; padding: 2px 12px; background: var(--field); font-size: 14px; }
+</style>
+</head>
+<body>
+<form id="f" novalidate>
+  <div class="top"><h1><b>panya</b></h1><button id="lang" type="button"></button></div>
+  <p data-i18n="help"></p>
+  <label for="u" data-i18n="user"></label>
+  <input id="u" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus>
+  <label for="p" data-i18n="pass"></label>
+  <input id="p" name="password" type="password" autocomplete="current-password" required>
+  <button id="go" type="submit" data-i18n="signIn"></button>
+  <p id="err" role="alert"></p>
+</form>
+<script>
+const L = {
+  th: { title: 'panya · เข้าสู่ระบบ', help: 'เข้าสู่ระบบด้วยชื่อผู้ใช้และรหัสผ่านที่ผู้ดูแลให้ไว้', user: 'ชื่อผู้ใช้', pass: 'รหัสผ่าน', signIn: 'เข้าสู่ระบบ', signingIn: 'กำลังเข้าสู่ระบบ…', other: 'EN',
+        empty: 'กรอกชื่อผู้ใช้และรหัสผ่าน', wrong: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง', locked: 'ลองผิดหลายครั้งเกินไป รอ 15 นาทีแล้วลองใหม่', down: 'ติดต่อเซิร์ฟเวอร์ไม่ได้ ลองใหม่อีกครั้ง' },
+  en: { title: 'panya · Sign in', help: 'Sign in with the username and password your administrator gave you.', user: 'Username', pass: 'Password', signIn: 'Sign in', signingIn: 'Signing in…', other: 'ไทย',
+        empty: 'Enter your username and password', wrong: 'Wrong username or password', locked: 'Too many attempts. Wait 15 minutes and try again.', down: 'Could not reach the server. Try again.' },
+}
+let lang = (() => { try { return localStorage.getItem('panya.lang') } catch { return null } })() || ((navigator.language || 'th').toLowerCase().startsWith('th') ? 'th' : 'en')
+const $ = (id) => document.getElementById(id)
+const t = (k) => L[lang][k]
+function applyLang() {
+  document.documentElement.lang = lang; document.title = t('title')
+  for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.dataset.i18n)
+  $('lang').textContent = t('other'); $('err').textContent = ''
+}
+$('lang').addEventListener('click', () => { lang = lang === 'th' ? 'en' : 'th'; try { localStorage.setItem('panya.lang', lang) } catch {}; applyLang() })
+applyLang()
+
+// กลับไปหน้าที่ขอไว้ เฉพาะ path ภายในเว็บนี้
+const next = (() => { const n = new URLSearchParams(location.search).get('next') || ''; return /^\/(?!\/)[^\\]*$/.test(n) ? n : '/dashboard' })()
+
+$('f').addEventListener('submit', async (ev) => {
+  ev.preventDefault()
+  const username = $('u').value.trim(), password = $('p').value
+  if (!username || !password) { $('err').textContent = t('empty'); return }
+  $('go').disabled = true; $('go').textContent = t('signingIn'); $('err').textContent = ''
+  try {
+    const r = await fetch('/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username, password }) })
+    if (r.ok) { location.replace(next); return }
+    $('err').textContent = t(r.status === 429 ? 'locked' : r.status === 401 ? 'wrong' : 'down')
+    $('p').value = ''; $('p').focus()
+  } catch { $('err').textContent = t('down') }
+  $('go').disabled = false; $('go').textContent = t('signIn')
+})
+</script>
+</body>
+</html>

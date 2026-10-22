@@ -1,8 +1,45 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
+import { getConnInfo } from 'hono/bun'
+import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { config } from './config'
 import type { Memory, MemoryStore, RememberInput } from './memory'
+import { MIN_PASSWORD, ROLES, USERNAME, randomPassword, type Role, type User } from './users'
 
-type Env = { Variables: { scope: string | null } }
+// scope = brain ที่เข้าได้ (null = ทุก brain) · user = ผู้ใช้ที่ล็อกอินด้วยรหัสผ่าน (ไม่มีเมื่อใช้ API key)
+type Env = { Variables: { scope: Set<string> | null; viewer?: boolean; user?: User } }
+
+/** ชื่อ cookie ของ session ผู้ใช้ */
+export const SESSION_COOKIE = 'panya_session'
+
+/** error ที่แปลว่าการเชื่อมต่อฐานข้อมูลตายแล้ว (mysql2 ที่ seekdb ใช้ตั้ง fatal และข้อความ closed state) */
+export function isLostConnection(err: unknown): boolean {
+  const e = err as { fatal?: boolean; message?: string; code?: string } | null
+  return !!e && (e.fatal === true || /closed state|connection lost|ECONNRESET|PROTOCOL_CONNECTION_LOST/i.test(`${e.message ?? ''} ${e.code ?? ''}`))
+}
+
+/** หมวดของรายการที่กำลังจะบันทึก ใช้บอกรถยกในหน้าคลังว่าต้องไปวางชั้นไหน */
+const groupOfInput = (i: RememberInput) => groupOf(i.source ?? '', i.subject ?? '', i.kind ?? 'fact')
+
+const PUBLIC_READ = new Set(['/v1/overview', '/v1/events', '/v1/graph', '/v1/points'])
+
+/** หมวดสั้น ๆ ของความจำสำหรับระบายสีบนภาพสมอง: คำแรกของชื่อไฟล์ต้นทางหรือ subject ถ้ายาวเกินใช้ชนิดแทน (ตรงกับหน้า /brain) */
+export function groupOf(source: string, subject: string, kind: string): string {
+  const tail = source.split(/[\\/]/).pop() || ''
+  const head = (tail || subject || '').split(/[_:.\-\s]/)[0] ?? ''
+  return head && head.length <= 14 ? head.toLowerCase() : kind
+}
+
+/** ที่อยู่ของเครื่องนี้หรือเครือข่ายภายใน (IPv4 ส่วนตัว, loopback, link-local, IPv6 ULA) */
+export function isPrivateAddress(raw: string | undefined): boolean {
+  if (!raw) return false
+  const ip = raw.toLowerCase().replace(/^::ffff:/, '')
+  const v4 = ip.match(/^(\d+)\.(\d+)\.\d+\.\d+$/)
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])]
+    return a === 127 || a === 10 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31) || (a === 169 && b === 254)
+  }
+  return ip === '::1' || /^f[cd][0-9a-f]{2}:/.test(ip) || /^fe[89ab][0-9a-f]:/.test(ip)
+}
 
 const KINDS = new Set(['fact', 'preference', 'event'])
 const BRAIN_NAME = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/
@@ -11,7 +48,28 @@ const IMPORT_MAX = 5000
 /** สิ่งที่ผู้เรียกเห็น: ใช้คำว่า brain แทน container ที่เป็นชื่อภายใน */
 const present = ({ container, ...m }: Memory) => ({ ...m, brain: container })
 
-export function createApp(store: MemoryStore, apiKeys: string[] = config.apiKeys) {
+export function createApp(
+  store: MemoryStore,
+  apiKeys: string[] = config.apiKeys,
+  opts: { publicDashboard?: 'off' | 'lan' | 'all'; warmPoints?: boolean; exitOnLostDb?: boolean; trustProxy?: boolean } = {},
+) {
+  const publicDashboard = opts.publicDashboard ?? config.publicDashboard
+  const trustProxy = opts.trustProxy ?? config.trustProxy
+  const users = store.users
+  // IP ของผู้เรียก · หลัง reverse proxy (Caddy/Cloudflare) ต้องอ่านจาก header ที่ proxy ใส่ให้ ไม่งั้นทุกคนเป็น IP เดียวกัน
+  const clientIp = (c: Context<Env>) => {
+    if (trustProxy) {
+      const h = c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for')?.split(',')[0]
+      if (h) return h.trim()
+    }
+    try { return getConnInfo(c).remote.address ?? '' } catch { return '' }
+  }
+  // lan: ใช้ IP ของการเชื่อมต่อจริงจาก Bun ไม่เชื่อ header อย่าง X-Forwarded-For ที่ปลอมได้
+  const publicAllowed = (c: Context<Env>) => {
+    if (publicDashboard === 'all') return true
+    if (publicDashboard !== 'lan') return false
+    try { return isPrivateAddress(getConnInfo(c).remote.address) } catch { return false }
+  }
   // "key" ใช้ได้ทุก brain · "key@brain" ใช้ได้กับ brain เดียว
   const keys = new Map<string, string | null>()
   for (const k of apiKeys) {
@@ -22,16 +80,124 @@ export function createApp(store: MemoryStore, apiKeys: string[] = config.apiKeys
   const app = new Hono<Env>()
   app.get('/health', (c) => c.json({ ok: true }))
 
+  // ── ผู้ใช้และ session ─────────────────────────────────────────────
+  // มีผู้ใช้อย่างน้อยหนึ่งคน = หน้าเว็บต้องล็อกอิน · ยังไม่มีผู้ใช้ = ใช้ API key แบบเดิม
+  const sessionOf = async (c: Context<Env>) => {
+    const sid = getCookie(c, SESSION_COOKIE)
+    return sid ? users.session(sid) : null
+  }
+  const secureCookie = (c: Context<Env>) =>
+    config.cookieSecure === 'auto'
+      ? new URL(c.req.url).protocol === 'https:' || (trustProxy && c.req.header('x-forwarded-proto') === 'https')
+      : config.cookieSecure
+  // cookie ถูกส่งไปกับคำขอข้ามเว็บได้ คำขอที่เขียนข้อมูลด้วย cookie จึงต้องมาจากเว็บนี้เอง
+  const sameOrigin = (c: Context<Env>) => {
+    const origin = c.req.header('origin')
+    if (!origin) return c.req.header('sec-fetch-site') !== 'cross-site'
+    try { return new URL(origin).host === (c.req.header('host') ?? new URL(c.req.url).host) } catch { return false }
+  }
+  const safeNext = (next: string | undefined) => (next && /^\/(?!\/)[^\\]*$/.test(next) ? next : '/dashboard')
+
+  // ผิดเกิน 5 ครั้งใน 15 นาที (ต่อชื่อผู้ใช้ + IP) หรือ 30 ครั้ง (ต่อ IP) พักไว้จนครบ 15 นาที
+  const FAIL_WINDOW = 15 * 60_000
+  const fails = new Map<string, { n: number; first: number }>()
+  const tooMany = (k: string, max: number) => {
+    const f = fails.get(k)
+    if (f && Date.now() - f.first > FAIL_WINDOW) { fails.delete(k); return false }
+    return !!f && f.n >= max
+  }
+  const fail = (k: string) => {
+    const f = fails.get(k)
+    if (!f || Date.now() - f.first > FAIL_WINDOW) fails.set(k, { n: 1, first: Date.now() })
+    else f.n++
+    if (fails.size > 10_000) fails.delete(fails.keys().next().value!)
+  }
+
+  const page = (file: string) => async (c: Context<Env>) => {
+    let html = await Bun.file(new URL(file, import.meta.url)).text()
+    if (users.loginRequired) {
+      const s = await sessionOf(c)
+      if (s) {
+        const me = JSON.stringify({ username: s.user.username, role: s.user.role, brains: s.user.brains }).replace(/</g, '\\u003c')
+        html = html.replace('</head>', `<script>window.PANYA_USER=${me}</script><script src="/assets/account.js"></script></head>`)
+      } else if (!(file === './dashboard.html' && publicAllowed(c))) {
+        const u = new URL(c.req.url)
+        return c.redirect('/login?next=' + encodeURIComponent(u.pathname + u.search))
+      }
+    }
+    c.header('cache-control', 'no-store')
+    return c.html(html)
+  }
+
+  app.get('/login', async (c) => {
+    if (await sessionOf(c)) return c.redirect(safeNext(c.req.query('next')))
+    return c.html(await Bun.file(new URL('./login.html', import.meta.url)).text())
+  })
+
+  app.post('/auth/login', async (c) => {
+    if (!sameOrigin(c)) return c.json({ error: 'cross-site request' }, 403)
+    const b = await c.req.json().catch(() => null)
+    const username = typeof b?.username === 'string' ? b.username.trim().toLowerCase() : ''
+    const password = typeof b?.password === 'string' ? b.password : ''
+    if (!username || !password || password.length > 256) return c.json({ error: 'username and password are required' }, 400)
+    const ip = clientIp(c), k = `${ip}|${username}`
+    if (tooMany(k, 5) || tooMany(ip, 30)) return c.json({ error: 'too many attempts, try again in 15 minutes' }, 429)
+    const user = await users.verify(username, password)
+    if (!user) {
+      fail(k); fail(ip)
+      console.warn(`[panya] login failed for "${username}" from ${ip}`)
+      return c.json({ error: 'wrong username or password' }, 401)
+    }
+    fails.delete(k)
+    const s = await users.startSession(user, ip)
+    setCookie(c, SESSION_COOKIE, s.token, { httpOnly: true, secure: secureCookie(c), sameSite: 'Lax', path: '/', expires: new Date(s.expiresAt) })
+    console.log(`[panya] login ${user.username} (${user.role}) from ${ip}`)
+    return c.json({ username: user.username, role: user.role, brains: user.brains, expiresAt: s.expiresAt })
+  })
+
+  app.post('/auth/logout', async (c) => {
+    const sid = getCookie(c, SESSION_COOKIE)
+    if (sid) await users.endSession(sid)
+    deleteCookie(c, SESSION_COOKIE, { path: '/' })
+    return c.json({ ok: true })
+  })
+
+  app.get('/auth/me', async (c) => {
+    const s = await sessionOf(c)
+    if (!s) return c.json({ error: 'not signed in', loginRequired: users.loginRequired }, 401)
+    return c.json({ username: s.user.username, role: s.user.role, brains: s.user.brains, expiresAt: s.expiresAt })
+  })
+
+  // เปลี่ยนรหัสผ่านของตัวเอง ต้องใส่รหัสเดิม · session อื่นของผู้ใช้นี้ถูกปิดหมด แล้วออก session ใหม่ให้เครื่องนี้
+  app.post('/auth/password', async (c) => {
+    if (!sameOrigin(c)) return c.json({ error: 'cross-site request' }, 403)
+    const s = await sessionOf(c)
+    if (!s) return c.json({ error: 'not signed in' }, 401)
+    const b = await c.req.json().catch(() => null)
+    if (typeof b?.next !== 'string' || b.next.length < MIN_PASSWORD || b.next.length > 256) return c.json({ error: `new password must be ${MIN_PASSWORD}-256 characters` }, 400)
+    const ip = clientIp(c), k = `${ip}|${s.user.username}`
+    if (tooMany(k, 5)) return c.json({ error: 'too many attempts, try again in 15 minutes' }, 429)
+    if (typeof b?.current !== 'string' || !(await users.verify(s.user.username, b.current))) { fail(k); return c.json({ error: 'current password is wrong' }, 401) }
+    await users.update(s.user.username, { password: b.next })
+    const fresh = await users.startSession(s.user, ip)
+    setCookie(c, SESSION_COOKIE, fresh.token, { httpOnly: true, secure: secureCookie(c), sameSite: 'Lax', path: '/', expires: new Date(fresh.expiresAt) })
+    return c.json({ ok: true })
+  })
+
   // หน้าแผนที่ความจำ: ตัวหน้าไม่มีข้อมูล ข้อมูลมาจาก /v1/graph ซึ่งต้องมี key
-  app.get('/brain', async (c) => c.html(await Bun.file(new URL('./brain.html', import.meta.url)).text()))
+  app.get('/brain', page('./brain.html'))
   // หน้าแดชบอร์ดรวมทุก brain: ข้อมูลมาจาก /v1/overview ซึ่งต้องมี key เช่นกัน
-  app.get('/dashboard', async (c) => c.html(await Bun.file(new URL('./dashboard.html', import.meta.url)).text()))
+  app.get('/dashboard', page('./dashboard.html'))
+  // คลังสินค้าสามมิติ: โซน = brain, ชั้นวาง = หมวด, กล่อง = ความจำ · ข้อมูลมาจาก /v1/overview, /v1/points, /v1/events
+  app.get('/warehouse', page('./warehouse.html'))
+  // หน้าจัดการผู้ใช้ (admin) · ข้อมูลมาจาก /v1/users
+  app.get('/users', page('./users.html'))
 
   // ไฟล์เสียงประกอบของหน้าแดชบอร์ด: เฉพาะไฟล์ใน src/assets และเฉพาะชื่อที่เป็นตัวพิมพ์เล็ก ตัวเลข ขีดกลาง
   // รองรับ Range เพื่อให้เบราว์เซอร์เลื่อนตำแหน่งเพลงและเล่นวนได้
-  const AUDIO = { mp3: 'audio/mpeg', ogg: 'audio/ogg', wav: 'audio/wav' } as const
+  const AUDIO = { mp3: 'audio/mpeg', ogg: 'audio/ogg', wav: 'audio/wav', js: 'text/javascript; charset=utf-8' } as const
   app.get('/assets/:file', async (c) => {
-    const m = c.req.param('file').match(/^[a-z0-9-]+\.(mp3|ogg|wav)$/)
+    const m = c.req.param('file').match(/^[a-z0-9-]+\.(mp3|ogg|wav|js)$/)
     if (!m) return c.notFound()
     const file = Bun.file(new URL('./assets/' + m[0], import.meta.url))
     if (!(await file.exists())) return c.notFound()
@@ -47,15 +213,35 @@ export function createApp(store: MemoryStore, apiKeys: string[] = config.apiKeys
 
   // ── ตัวนับการใช้งาน ───────────────────────────────────────────────
   // อยู่ในหน่วยความจำของ process นี้ รีสตาร์ตแล้วเริ่มนับใหม่ · วงแหวน 60 ช่อง ช่องละหนึ่งนาที
+  // นับรวมทั้งเซิร์ฟเวอร์ และแยกต่อ brain เพื่อให้แดชบอร์ดสลับดูทีละ brain ได้
   const startedAt = Date.now()
-  const ring = Array.from({ length: 60 }, () => ({ minute: -1, searches: 0, abstained: 0 }))
-  const usage = { searches: 0, abstained: 0, searchMs: 0 }
-  const recordSearch = (ms: number, abstained: boolean) => {
-    const minute = Math.floor(Date.now() / 60_000)
-    const slot = ring[minute % 60]!
+  const counter = () => ({ ring: Array.from({ length: 60 }, () => ({ minute: -1, searches: 0, abstained: 0 })), searches: 0, abstained: 0, searchMs: 0 })
+  type Counter = ReturnType<typeof counter>
+  const usage = counter()
+  const usageByBrain = new Map<string, Counter>()
+  const bump = (u: Counter, minute: number, ms: number, abstained: boolean) => {
+    const slot = u.ring[minute % 60]!
     if (slot.minute !== minute) { slot.minute = minute; slot.searches = 0; slot.abstained = 0 }
-    slot.searches++; usage.searches++; usage.searchMs += ms
-    if (abstained) { slot.abstained++; usage.abstained++ }
+    slot.searches++; u.searches++; u.searchMs += ms
+    if (abstained) { slot.abstained++; u.abstained++ }
+  }
+  const recordSearch = (brain: string, ms: number, abstained: boolean) => {
+    const minute = Math.floor(Date.now() / 60_000)
+    bump(usage, minute, ms, abstained)
+    if (!usageByBrain.has(brain)) usageByBrain.set(brain, counter())
+    bump(usageByBrain.get(brain)!, minute, ms, abstained)
+  }
+  // 60 นาทีล่าสุดของตัวนับหนึ่งตัว ช่องสุดท้าย = นาทีปัจจุบัน
+  const lastHour = (u: Counter) => {
+    const minute = Math.floor(Date.now() / 60_000)
+    const slots = Array.from({ length: 60 }, (_, i) => {
+      const m = minute - 59 + i, slot = u.ring[m % 60]!
+      return slot.minute === m ? slot : { searches: 0, abstained: 0 }
+    })
+    return {
+      total: u.searches, abstained: u.abstained, avgMs: u.searches ? Math.round(u.searchMs / u.searches) : 0,
+      minute: slots.map((s) => s.searches), abstainedMinute: slots.map((s) => s.abstained),
+    }
   }
 
   // ── เหตุการณ์สด ───────────────────────────────────────────────────
@@ -63,7 +249,7 @@ export function createApp(store: MemoryStore, apiKeys: string[] = config.apiKeys
   type LiveEvent = {
     seq: number; at: number; type: 'in' | 'out' | 'del'; brain: string; n: number; text: string
     created?: number; superseded?: number; merged?: number
-    hits?: number; abstained?: boolean; reason?: string; ms?: number; what?: 'memory' | 'source' | 'brain'
+    hits?: number; abstained?: boolean; reason?: string; ms?: number; what?: 'memory' | 'source' | 'brain'; group?: string
   }
   const events: LiveEvent[] = []
   let seq = 0
@@ -83,7 +269,18 @@ export function createApp(store: MemoryStore, apiKeys: string[] = config.apiKeys
   type Overview = { at: number; ms: number; brains: Awaited<ReturnType<MemoryStore['overview']>> }
   let overview: Overview | null = null
   let scanning: Promise<Overview> | null = null
-  const changed = () => { overview = null }
+  // แผนที่ความจำคำนวณหนัก (PCA + เพื่อนบ้าน) แดชบอร์ดหลายจอขอซ้ำบ่อย จึงเก็บผลไว้ครึ่งนาที
+  const GRAPH_TTL = 30_000
+  const graphs = new Map<string, { at: number; graph: Promise<Awaited<ReturnType<MemoryStore['graph']>>> }>()
+  const loadGraph = (brain: string, limit: number) => {
+    const k = `${brain}|${limit}`, hit = graphs.get(k)
+    if (hit && Date.now() - hit.at < GRAPH_TTL) return hit.graph
+    const graph = store.graph(brain, { limit })
+    graph.catch(() => graphs.delete(k))
+    graphs.set(k, { at: Date.now(), graph })
+    return graph
+  }
+  const changed = () => { overview = null; graphs.clear() }
   const loadOverview = (): Promise<Overview> => {
     if (overview && Date.now() - overview.at < OVERVIEW_TTL) return Promise.resolve(overview)
     scanning ??= (async () => {
@@ -97,18 +294,41 @@ export function createApp(store: MemoryStore, apiKeys: string[] = config.apiKeys
   }
 
   app.use('/v1/*', async (c, next) => {
-    const token = c.req.header('authorization')?.replace(/^Bearer\s+/i, '') ?? ''
-    if (!keys.has(token)) return c.json({ error: 'unauthorized' }, 401)
-    c.set('scope', keys.get(token) ?? null)
-    await next()
+    const token = c.req.header('authorization')?.replace(/^Bearer\s*/i, '').trim() ?? ''
+    if (keys.has(token)) {
+      const bound = keys.get(token)
+      c.set('scope', bound ? new Set([bound]) : null)
+      return next()
+    }
+    // ผู้ใช้ที่ล็อกอินแล้ว: หน้าเว็บส่ง cookie มาเอง ไม่มี Authorization
+    if (!token) {
+      const s = await sessionOf(c)
+      if (s) {
+        const u = s.user
+        if (c.req.method !== 'GET' && !sameOrigin(c)) return c.json({ error: 'cross-site request' }, 403)
+        // viewer อ่านและค้นได้ แต่เขียน นำเข้า หรือลบไม่ได้
+        if (u.role === 'viewer' && c.req.method !== 'GET' && c.req.path !== '/v1/search') return c.json({ error: 'read-only user' }, 403)
+        c.set('scope', u.role === 'admin' || u.brains.includes('*') ? null : new Set(u.brains))
+        c.set('user', u)
+        return next()
+      }
+    }
+    // แดชบอร์ดสาธารณะ: ไม่มี key ก็อ่านสถิติและเหตุการณ์ได้ เฉพาะสอง endpoint นี้ และเฉพาะ GET
+    // ส่ง key มาแต่ผิด = ปฏิเสธเสมอ ไม่ปล่อยผ่านเป็นผู้ชม เพื่อให้ผู้เรียกรู้ว่า key ใช้ไม่ได้
+    if (!token && c.req.method === 'GET' && PUBLIC_READ.has(c.req.path) && publicAllowed(c)) {
+      c.set('scope', null)
+      c.set('viewer', true)
+      return next()
+    }
+    return c.json({ error: 'unauthorized' }, 401)
   })
 
   // key ที่ผูก brain จะอ่าน/เขียนได้เฉพาะ brain นั้น ไม่ว่าคำขอจะส่งอะไรมา
   // รับชื่อฟิลด์ container ด้วยเพื่อไม่ให้ผู้เรียกรุ่นแรกพัง
-  const brainOf = (scope: string | null, ...requested: unknown[]): string | null => {
+  const brainOf = (scope: Set<string> | null, ...requested: unknown[]): string | null => {
     const name = requested.find((r) => typeof r === 'string' && r)
     if (typeof name !== 'string' || !BRAIN_NAME.test(name)) return null
-    if (scope !== null && scope !== name) return null
+    if (scope !== null && !scope.has(name)) return null
     return name
   }
   const denied = { error: 'brain not allowed' }
@@ -154,7 +374,7 @@ export function createApp(store: MemoryStore, apiKeys: string[] = config.apiKeys
     if (typeof input === 'string') return c.json({ error: input }, 400)
     const r = await store.remember(input)
     changed()
-    emit({ type: 'in', brain, n: 1, text: snip(input.text), ...tally([r]) })
+    emit({ type: 'in', brain, n: 1, text: snip(input.text), group: groupOfInput(input), ...tally([r]) })
     return c.json({ memory: present(r.memory), action: r.action }, r.action === 'merged' ? 200 : 201)
   })
 
@@ -167,7 +387,7 @@ export function createApp(store: MemoryStore, apiKeys: string[] = config.apiKeys
     if (typeof inputs === 'string') return c.json({ error: inputs }, 400)
     const results = await store.rememberMany(inputs)
     changed()
-    emit({ type: 'in', brain, n: inputs.length, text: snip(inputs[0]!.text), ...tally(results) })
+    emit({ type: 'in', brain, n: inputs.length, text: snip(inputs[0]!.text), group: groupOfInput(inputs[0]!), ...tally(results) })
     return c.json({ results: results.map((r) => ({ memory: present(r.memory), action: r.action })) }, 201)
   })
 
@@ -184,7 +404,7 @@ export function createApp(store: MemoryStore, apiKeys: string[] = config.apiKeys
     // rerank: false = ข้าม reranker สำหรับคำขอนี้ (เมื่อผู้เรียกต้องการความเร็วมากกว่าความแม่น)
     const r = await store.search(brain, b.q, { limit, tuning, rerank: b.rerank === false ? false : undefined })
     const ms = Math.round(performance.now() - t0)
-    recordSearch(ms, r.abstained)
+    recordSearch(brain, ms, r.abstained)
     emit({ type: 'out', brain, n: r.hits.length, text: snip(b.q), hits: r.hits.length, abstained: r.abstained, reason: r.reason, ms })
     return c.json({ ...r, hits: r.hits.map(({ container, ...h }) => ({ ...h, brain: container })) })
   })
@@ -193,7 +413,71 @@ export function createApp(store: MemoryStore, apiKeys: string[] = config.apiKeys
     const brain = brainOf(c.get('scope'), c.req.query('brain'), c.req.query('container'))
     if (!brain) return c.json(denied, 403)
     const limit = Math.max(1, Math.min(3000, Number(c.req.query('limit')) || 1500))
-    return c.json(await store.graph(brain, { limit }))
+    const g = await loadGraph(brain, limit)
+    // ผู้ชมที่ไม่มี key ได้เฉพาะตำแหน่ง หมวด และชนิด ไม่ได้ข้อความ subject หรือชื่อไฟล์ต้นทาง
+    if (c.get('viewer')) {
+      return c.json({
+        nodes: g.nodes.map((n) => ({ id: n.id, kind: n.kind, count: n.count, createdAt: n.createdAt, x: n.x, y: n.y, group: groupOf(n.source, n.subject, n.kind) })),
+        edges: g.edges,
+      })
+    }
+    return c.json({ ...g, nodes: g.nodes.map((n) => ({ ...n, group: groupOf(n.source, n.subject, n.kind) })) })
+  })
+
+  // ── ทุกความจำเป็นจุด (สำหรับภาพสมองบนแดชบอร์ด) ───────────────────
+  // คำนวณจาก embedding ทั้งชุดจึงหนัก: เก็บผลไว้ 10 นาที และไม่ทิ้งทุกครั้งที่มีการเขียน (จุดใหม่จะขึ้นในรอบถัดไป)
+  // ส่งเป็นอาร์เรย์แยกตามช่องเพื่อให้ขนาดเล็ก ไม่มีข้อความความจำ ใครอ่านได้เท่ากับ /v1/graph แบบผู้ชม
+  const POINTS_TTL = 10 * 60_000
+  const pointsCache = new Map<string, { at: number; data: Promise<object> }>()
+  const buildPoints = async (brain: string) => {
+    const t0 = performance.now()
+    const p = await store.points(brain)
+    const groupIndex = new Map<string, number>()
+    const g = p.metas.map((m) => {
+      const name = groupOf(m.source, m.subject, m.kind)
+      if (!groupIndex.has(name)) groupIndex.set(name, groupIndex.size)
+      return groupIndex.get(name)!
+    })
+    const r4 = (v: number) => Math.round(v * 1e4) / 1e4
+    return {
+      brain, computedAt: Date.now(), ms: Math.round(performance.now() - t0), total: p.metas.length,
+      groups: [...groupIndex.keys()], ids: p.metas.map((m) => m.id), x: p.xs.map(r4), y: p.ys.map(r4), g,
+      t: p.metas.map((m) => m.createdAt), c: p.metas.map((m) => m.count), edges: p.edges.map(([a, b]) => [a, b]),
+    }
+  }
+  app.get('/v1/points', async (c) => {
+    const brain = brainOf(c.get('scope'), c.req.query('brain'), c.req.query('container'))
+    if (!brain) return c.json(denied, 403)
+    const hit = pointsCache.get(brain)
+    if (hit && Date.now() - hit.at <= POINTS_TTL) return c.json(await hit.data)
+    // หมดอายุแล้ว: ส่งชุดเดิมไปก่อน แล้วคำนวณใหม่เบื้องหลัง ผู้ใช้ไม่ต้องรอ
+    const fresh = { at: Date.now(), data: buildPoints(brain) }
+    fresh.data.then(() => pointsCache.set(brain, fresh), () => { if (pointsCache.get(brain) === fresh) pointsCache.delete(brain) })
+    if (hit) { hit.at = Date.now(); return c.json(await hit.data) }
+    pointsCache.set(brain, fresh)
+    return c.json(await fresh.data)
+  })
+
+  // เปิดเซิร์ฟเวอร์แล้วคำนวณจุดของทุก brain ล่วงหน้าทีละใบ ผู้เปิดแดชบอร์ดคนแรกจึงไม่ต้องรอ
+  if (opts.warmPoints) {
+    setTimeout(async () => {
+      try {
+        for (const b of await store.overview()) {
+          if (pointsCache.has(b.brain)) continue
+          const entry = { at: Date.now(), data: buildPoints(b.brain) }
+          pointsCache.set(b.brain, entry)
+          await entry.data.catch(() => pointsCache.delete(b.brain))
+        }
+      } catch (err) { console.error('[panya] warm points', err) }
+    }, 5000)
+  }
+
+  // ความจำหนึ่งรายการ (ต้องมี key) ใช้แสดงข้อความเมื่อชี้จุดบนภาพสมอง
+  app.get('/v1/memories/:id', async (c) => {
+    const brain = brainOf(c.get('scope'), c.req.query('brain'), c.req.query('container'))
+    if (!brain) return c.json(denied, 403)
+    const m = await store.getOne(brain, c.req.param('id'))
+    return m ? c.json({ memory: present(m) }) : c.json({ error: 'not found' }, 404)
   })
 
   app.get('/v1/profile', async (c) => {
@@ -213,21 +497,17 @@ export function createApp(store: MemoryStore, apiKeys: string[] = config.apiKeys
   app.get('/v1/overview', async (c) => {
     const scope = c.get('scope')
     const o = await loadOverview()
-    const brains = scope === null ? o.brains : o.brains.filter((b) => b.brain === scope)
-    if (scope !== null) return c.json({ now: o.at, brains })
-    const minute = Math.floor(Date.now() / 60_000)
-    const last60 = Array.from({ length: 60 }, (_, i) => {
-      const m = minute - 59 + i
-      const slot = ring[m % 60]!
-      return slot.minute === m ? slot : { searches: 0, abstained: 0 }
-    })
+    const brains = scope === null ? o.brains : o.brains.filter((b) => scope.has(b.brain))
+    const user = c.get('user')
+    const me = user ? { username: user.username, role: user.role } : undefined
+    if (scope !== null) return c.json({ now: o.at, brains, me })
     return c.json({
       now: o.at,
       brains,
-      searches: {
-        total: usage.searches, abstained: usage.abstained, avgMs: usage.searches ? Math.round(usage.searchMs / usage.searches) : 0,
-        minute: last60.map((s) => s.searches), abstainedMinute: last60.map((s) => s.abstained),
-      },
+      me,
+      // viewer = เปิดดูโดยไม่มี key (โหมดแดชบอร์ดสาธารณะ) อ่านได้อย่างเดียว
+      viewer: c.get('viewer') === true,
+      searches: { ...lastHour(usage), brains: Object.fromEntries([...usageByBrain].map(([b, u]) => [b, lastHour(u)])) },
       server: { startedAt, scanMs: o.ms, rssMb: Math.round(process.memoryUsage().rss / 1048576) },
     })
   })
@@ -255,7 +535,7 @@ export function createApp(store: MemoryStore, apiKeys: string[] = config.apiKeys
   app.get('/v1/events', (c) => {
     const scope = c.get('scope')
     const after = c.req.query('after')
-    let list = scope === null ? events : events.filter((e) => e.brain === scope)
+    let list = scope === null ? events : events.filter((e) => scope.has(e.brain))
     list = after === undefined ? list.slice(-40) : list.filter((e) => e.seq > Number(after)).slice(-200)
     return c.json({ seq, now: Date.now(), events: list })
   })
@@ -293,7 +573,7 @@ export function createApp(store: MemoryStore, apiKeys: string[] = config.apiKeys
     for (let i = 0; i < inputs.length; i += 200) {
       for (const r of await store.rememberMany(inputs.slice(i, i + 200))) counts[r.action]++
     }
-    emit({ type: 'in', brain, n: inputs.length, text: snip(inputs[0]!.text), ...counts })
+    emit({ type: 'in', brain, n: inputs.length, text: snip(inputs[0]!.text), group: groupOfInput(inputs[0]!), ...counts })
     return c.json({ brain, imported: inputs.length, ...counts }, 201)
   })
 
@@ -351,8 +631,82 @@ export function createApp(store: MemoryStore, apiKeys: string[] = config.apiKeys
     return c.json({ ok: true })
   })
 
+  // ── จัดการผู้ใช้ ─────────────────────────────────────────────────
+  // ได้เฉพาะผู้ใช้ role admin หรือ API key ที่ไม่ผูก brain
+  const isAdmin = (c: Context<Env>) => {
+    const u = c.get('user')
+    return u ? u.role === 'admin' : c.get('scope') === null && !c.get('viewer')
+  }
+  const validBrains = (v: unknown): v is string[] =>
+    Array.isArray(v) && v.length <= 100 && v.every((x) => typeof x === 'string' && (x === '*' || BRAIN_NAME.test(x)))
+  // ต้องเหลือ admin ที่ใช้งานได้อย่างน้อยหนึ่งคนเสมอ ไม่งั้นไม่มีใครจัดการผู้ใช้ได้
+  const lastAdmin = async (username: string) =>
+    !(await users.list()).some((u) => u.role === 'admin' && !u.disabled && u.username !== username)
+
+  app.get('/v1/users', async (c) => {
+    if (!isAdmin(c)) return c.json({ error: 'admin only' }, 403)
+    return c.json({ users: await users.list() })
+  })
+
+  // { username, role, brains, password? } ไม่ใส่ password = สุ่มให้ และคืนรหัสนั้นครั้งเดียวในคำตอบ
+  app.post('/v1/users', async (c) => {
+    if (!isAdmin(c)) return c.json({ error: 'admin only' }, 403)
+    const b = await c.req.json().catch(() => null)
+    const username = typeof b?.username === 'string' ? b.username.trim().toLowerCase() : ''
+    if (!USERNAME.test(username)) return c.json({ error: 'username must be 2-64 characters: a-z 0-9 . _ -' }, 400)
+    if (!ROLES.has(b?.role)) return c.json({ error: 'role must be admin, member or viewer' }, 400)
+    const brains = b?.brains ?? []
+    if (!validBrains(brains)) return c.json({ error: 'brains must be a list of brain names or "*"' }, 400)
+    const generated = b?.password === undefined
+    const password: string = generated ? randomPassword() : b.password
+    if (typeof password !== 'string' || password.length < MIN_PASSWORD || password.length > 256) return c.json({ error: `password must be ${MIN_PASSWORD}-256 characters` }, 400)
+    if (await users.get(username)) return c.json({ error: 'username already exists' }, 409)
+    const user = await users.create(username, password, b.role as Role, brains)
+    return c.json({ user, ...(generated ? { password } : {}) }, 201)
+  })
+
+  // { role?, brains?, disabled?, password? | resetPassword: true }
+  app.patch('/v1/users/:name', async (c) => {
+    if (!isAdmin(c)) return c.json({ error: 'admin only' }, 403)
+    const name = c.req.param('name')
+    const target = await users.get(name)
+    if (!target) return c.json({ error: 'not found' }, 404)
+    const b = await c.req.json().catch(() => null)
+    if (!b || typeof b !== 'object') return c.json({ error: 'body must be a JSON object' }, 400)
+    const patch: Parameters<typeof users.update>[1] = {}
+    if (b.role !== undefined) { if (!ROLES.has(b.role)) return c.json({ error: 'invalid role' }, 400); patch.role = b.role }
+    if (b.brains !== undefined) { if (!validBrains(b.brains)) return c.json({ error: 'invalid brains' }, 400); patch.brains = b.brains }
+    if (b.disabled !== undefined) { if (typeof b.disabled !== 'boolean') return c.json({ error: 'invalid disabled' }, 400); patch.disabled = b.disabled }
+    let generated: string | undefined
+    if (b.resetPassword === true) patch.password = generated = randomPassword()
+    else if (b.password !== undefined) {
+      if (typeof b.password !== 'string' || b.password.length < MIN_PASSWORD || b.password.length > 256) return c.json({ error: `password must be ${MIN_PASSWORD}-256 characters` }, 400)
+      patch.password = b.password
+    }
+    const demoted = (patch.role !== undefined && patch.role !== 'admin') || patch.disabled === true
+    if (target.role === 'admin' && demoted && (await lastAdmin(name))) return c.json({ error: 'cannot demote or disable the last admin' }, 409)
+    await users.update(name, patch)
+    return c.json({ user: await users.get(name), ...(generated ? { password: generated } : {}) })
+  })
+
+  app.delete('/v1/users/:name', async (c) => {
+    if (!isAdmin(c)) return c.json({ error: 'admin only' }, 403)
+    const name = c.req.param('name')
+    const target = await users.get(name)
+    if (!target) return c.json({ error: 'not found' }, 404)
+    if (target.role === 'admin' && (await lastAdmin(name))) return c.json({ error: 'cannot delete the last admin' }, 409)
+    await users.remove(name)
+    return c.json({ ok: true })
+  })
+
   app.onError((err, c) => {
     console.error('[panya]', err)
+    // การเชื่อมต่อ seekdb หลุดแล้วไม่ต่อใหม่เอง (เช่นหลัง Docker หรือเครื่องหลับ) ทุกคำขอจะพังจนกว่าจะรีสตาร์ต
+    // จึงปิด process หลังตอบคำขอนี้ ให้ตัวสั่งเริ่ม (scripts/start-panya.ps1 หรือ Docker restart policy) เปิดใหม่
+    if (opts.exitOnLostDb && isLostConnection(err)) {
+      console.error('[panya] lost the seekdb connection, exiting so the launcher restarts the server')
+      setTimeout(() => process.exit(1), 200)
+    }
     return c.json({ error: 'internal error' }, 500)
   })
 

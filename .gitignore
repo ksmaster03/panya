@@ -10,3 +10,6 @@ eval/.baseline-map*.json
 logs/
 dist/
 build/
+
+# เพลงประกอบ: ยังไม่ยืนยันสิทธิ์เผยแพร่ใน repo สาธารณะ
+*.mp3

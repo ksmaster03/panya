@@ -69,7 +69,7 @@
   .kpi em { display: block; font-style: normal; font-size: 12px; color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   /* แผงหลัก: คลื่นสัญญาณ | สมองสามมิติ | ฟีดสด */
-  #deck { display: grid; grid-template-columns: 300px minmax(0, 1fr) 350px; gap: 12px; height: clamp(500px, calc(100vh - 176px), 800px); }
+  #deck { display: grid; grid-template-columns: 300px minmax(0, 1fr) 350px; gap: 12px; height: clamp(460px, calc(100vh - 330px), 800px); }
   #signals, #feed-panel { display: flex; flex-direction: column; min-height: 0; }
   #strips { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 6px; overflow: hidden; }
   .strip { flex: 1 1 0; min-height: 46px; display: grid; grid-template-rows: auto 1fr; border-top: 1px solid var(--grid); padding-top: 4px; }
@@ -89,6 +89,7 @@
   .flow i { font-style: normal; font-weight: 600; }
   #flow-in { left: 10px; } #flow-in i { color: #7db6ff; }
   #flow-out { right: 10px; text-align: right; } #flow-out i { color: #4fd3a4; }
+  #spin { position: absolute; top: 10px; right: 10px; z-index: 2; font-size: 13px; padding: 4px 12px; }
   #hud-foot { left: 12px; right: 12px; bottom: 8px; display: flex; justify-content: space-between; gap: 12px; color: var(--muted); }
   #feed { list-style: none; margin: 0; padding: 0; flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
   .ev { border: 1px solid var(--grid); border-left: 3px solid var(--c); border-radius: 8px; padding: 6px 10px; background: rgba(4, 12, 28, .6); font-size: 13px; line-height: 1.5; animation: slide .35s ease-out; }
@@ -134,6 +135,19 @@
   thead th[aria-sort="descending"]::after { content: " ▼"; color: var(--cyan); }
   tbody tr { cursor: pointer; }
   tbody tr:hover { background: rgba(57, 135, 229, .12); }
+  tbody tr.on td { background: rgba(57, 135, 229, .22); }
+  tbody tr.on td:first-child { box-shadow: inset 3px 0 0 var(--cyan); }
+
+  /* ตัวเลือกสมอง: ทุกสมอง หรือทีละสมอง · สมองที่เลือกเป็นพื้นทึบ */
+  #pick { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; padding: 8px 12px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chips button { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; background: var(--field); }
+  .chips button small { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .chips button[aria-pressed="true"] { background: rgba(57, 135, 229, .5); border-color: rgba(127, 227, 255, .6); font-weight: 600; }
+  .chips button[aria-pressed="true"] small { color: var(--ink2); }
+  .chips i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .chips i.live { background: var(--good); box-shadow: 0 0 8px var(--good); }
+  .badge { font-size: 12px; color: var(--ink2); border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; white-space: nowrap; }
   tbody td:first-child { font-weight: 600; color: var(--ink); }
   tfoot td { font-weight: 600; border-bottom: 0; border-top: 1px solid var(--axis); }
   .bar { position: relative; display: inline-block; min-width: 96px; text-align: right; }
@@ -175,6 +189,7 @@
   @media (max-width: 760px) {
     #charts { grid-template-columns: 1fr; }
     #deck { display: contents; }
+    #pick { order: -3; }
     #stage { order: -2; height: min(48vh, 380px); }
     #kpis { order: -1; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
     .kpi { padding: 6px 10px; min-width: 0; } .kpi strong { font-size: 20px; } .kpi em { font-size: 11px; }
@@ -190,15 +205,21 @@
 <body>
 <header>
   <h1><b>panya</b> <span data-i18n="subtitle"></span></h1>
-  <nav class="nav" data-i18n-aria="navAria"><a href="/brain" data-i18n="navBrain"></a><a href="/dashboard" aria-current="page" data-i18n="navDash"></a></nav>
+  <nav class="nav" data-i18n-aria="navAria"><a href="/brain" data-i18n="navBrain"></a><a href="/dashboard" aria-current="page" data-i18n="navDash"></a><a href="/warehouse" data-i18n="navWh"></a></nav>
   <span id="live" role="status"><i></i><span id="live-text"></span></span>
   <span class="grow"></span>
   <button id="lang" type="button"></button>
   <button id="pause" type="button" aria-pressed="false" hidden></button>
+  <span id="viewer" class="badge" data-i18n="viewerBadge" hidden></span>
+  <button id="use-key" type="button" data-i18n="useKey" hidden></button>
   <button id="logout" type="button" data-i18n="signOut" hidden></button>
 </header>
 
 <main id="app" hidden>
+  <section id="pick" class="panel">
+    <div class="chips" id="brains" role="group" data-i18n-aria="brainsAria"></div>
+    <button id="open3d" type="button" hidden></button>
+  </section>
   <section id="kpis" aria-label="ตัวเลขหลัก"></section>
 
   <section id="deck">
@@ -212,7 +233,8 @@
       <div class="hud" id="hud-title"><b>PANYA MEMORY CORE</b><span id="hud-line"></span></div>
       <div class="hud flow" id="flow-in"><i data-i18n="inbound"></i><strong id="in-rate">0</strong><span data-i18n="itemsPerMin"></span></div>
       <div class="hud flow" id="flow-out"><i data-i18n="outbound"></i><strong id="out-rate">0</strong><span data-i18n="timesPerMin"></span></div>
-      <div class="hud" id="hud-foot"><span data-i18n="stageHint"></span><span id="hud-orbs"></span></div>
+      <button id="spin" type="button" aria-pressed="true"></button>
+      <div class="hud" id="hud-foot"><span data-i18n="stageHint"></span><span id="hud-points"></span><span id="hud-orbs"></span></div>
     </div>
 
     <div class="panel" id="feed-panel" data-i18n-aria="feedTitle">
@@ -275,6 +297,7 @@
     <p data-i18n="gateHelp"></p>
     <input id="key" type="password" placeholder="API key" autocomplete="current-password" aria-label="API key" required>
     <button class="primary" id="enter" data-i18n="signIn"></button>
+    <button id="gate-cancel" type="button" data-i18n="cancel" hidden></button>
     <p id="err" role="alert"></p>
   </form>
 </div>
@@ -300,10 +323,12 @@ const L = {
     signals: 'คลื่นสัญญาณ · 90 วินาทีล่าสุด', receiving: 'กำลังรับข้อมูล', idle: 'พัก',
     heroAria: 'ภาพสมองสามมิติของทั้งระบบ ลูกทรงกลมรอบสมองคือสมองแต่ละใบ จุดแสงที่วิ่งเข้าคือความจำที่ถูกเขียน จุดแสงที่วิ่งออกคือผลการค้น',
     connecting: 'กำลังเชื่อมต่อ…', watching: (n, b) => `เฝ้าดูความจำ ${n} รายการ ใน ${b} สมอง`, orbsCap: (b) => `แสดง 12 จาก ${b} สมอง ที่เหลืออยู่ในตาราง`,
-    inbound: '↓ ขาเข้า', outbound: 'ขาออก ↑', itemsPerMin: 'รายการ/นาที', timesPerMin: 'ครั้ง/นาที', stageHint: 'ลากเพื่อหมุน · กดลูกทรงกลมเพื่อเปิดสมองนั้น',
+    inbound: '↓ ขาเข้า', outbound: 'ขาออก ↑', itemsPerMin: 'รายการ/นาที', timesPerMin: 'ครั้ง/นาที', stageHint: 'ลากเพื่อหมุน · กดลูกทรงกลมเพื่อเลือกดูสมองนั้น',
     sndTitle: 'เสียงประกอบ', sndPlay: 'เล่นเพลง', sndPause: 'หยุดเพลง', sndVol: 'ระดับเสียง', sndSeek: 'ตำแหน่งเพลง กดหรือใช้ลูกศรซ้ายขวาเพื่อเลื่อน',
     sndIdle: 'กดเล่นเพื่อเปิดเสียงและดูคลื่นเสียง', sndLoading: 'กำลังโหลดคลื่นเสียง', sndPlaying: 'กำลังเล่น กดคลื่นเสียงเพื่อเลื่อน', sndPaused: 'หยุดชั่วคราว', sndError: 'เปิดไฟล์เสียงไม่ได้',
-    navAria: 'หน้าหลัก', navBrain: 'สมอง', navDash: 'แดชบอร์ด', to: 'ถึง', scrollHint: 'เลื่อนตารางไปทางขวาเพื่อดูคอลัมน์ที่เหลือ',
+    spinStop: 'หยุดหมุน', spinGo: 'หมุนต่อ', nodeNoText: 'ใช้ API key เพื่ออ่านข้อความ', nodeLoading: 'กำลังโหลดข้อความ…', pointsAll: (n) => `จุดความจำ: แสดงครบ ${n} รายการ`, pointsSample: (n) => `จุดความจำ: ตัวอย่าง ${n} รายการ กำลังโหลดทั้งหมด…`, viewerBadge: 'ดูอย่างเดียว ไม่ต้องใช้ key', useKey: 'ใช้ API key', cancel: 'ยกเลิก', allBrains: 'ทุกสมอง', brainsAria: 'เลือกสมองที่จะดู',
+    open3d: 'เปิดสมองนี้แบบสามมิติ', open3dKey: 'เปิดแบบสามมิติ (ต้องใช้ key)', kBrain: 'สมองที่เลือก', watchingOne: (n, b) => `เฝ้าดูความจำ ${n} รายการ ในสมอง ${b}`,
+    navAria: 'หน้าหลัก', navWh: 'คลังสินค้า', navBrain: 'สมอง', navDash: 'แดชบอร์ด', to: 'ถึง', scrollHint: 'เลื่อนตารางไปทางขวาเพื่อดูคอลัมน์ที่เหลือ',
     feedTitle: 'ความจำเข้าและออก แบบสด', dirIn: 'เข้า', dirOut: 'ออก', dirAbstain: 'ไม่ตอบ', dirDel: 'ลบ',
     feedEmpty: 'ยังไม่มีความจำเข้าหรือออกผ่านเซิร์ฟเวอร์นี้ เมื่อมีการเขียนหรือค้น รายการจะขึ้นที่นี่ทันที',
     items: (n) => `${n} รายการ`, evNew: 'ใหม่', evReplaced: 'แทนค่าเดิม', evMerged: 'รวมกับที่ซ้ำ', asked: 'ถาม: ', found: (n) => `พบ ${n} ความจำ`,
@@ -315,14 +340,14 @@ const L = {
     writesSub: (name, total, peak, unit) => `${name} · รวม ${total} รายการ · สูงสุด ${peak} ${unit}`, written: 'เขียนเข้ามา', now: 'ตอนนี้',
     searchTitle: 'การค้นหา · 60 นาทีล่าสุด', answered: 'ตอบได้', abstained: 'เลือกไม่ตอบ',
     searchSub: (n, a) => `รวม ${n} ครั้ง · เลือกไม่ตอบ ${a} ครั้ง`, searchNone: 'ยังไม่มีการค้นในชั่วโมงนี้ · ตัวนับเริ่มใหม่ทุกครั้งที่รีสตาร์ตเซิร์ฟเวอร์',
-    tableTitle: 'ตารางสถิติหน่วยความจำ · กดแถวเพื่อเปิดสมอง', kindFact: 'ข้อเท็จจริง', kindPref: 'ความชอบ', kindEvent: 'เหตุการณ์', filterPh: 'กรองชื่อสมอง',
+    tableTitle: 'ตารางสถิติหน่วยความจำ · กดแถวเพื่อเลือกดูสมองนั้น', kindFact: 'ข้อเท็จจริง', kindPref: 'ความชอบ', kindEvent: 'เหตุการณ์', filterPh: 'กรองชื่อสมอง',
     cBrain: 'สมอง', cLive: 'ความจำที่ใช้ได้', cShare: 'สัดส่วน', cM60: '60 นาที', cH24: '24 ชม.', cTrend: 'แนวโน้ม 24 ชม.', cD30: '30 วัน', cMix: 'ชนิด', cKeyed: 'มีคีย์', cSources: 'แหล่ง',
     cSuperseded: 'ถูกแทน', cExpired: 'หมดอายุ', cMerges: 'รวมซ้ำ', cAvg: 'ยาวเฉลี่ย', cFirst: 'เริ่มเมื่อ', cLast: 'เขียนล่าสุด', cState: 'สถานะ',
     chars: 'ตัวอักษร', total: (n) => `รวม ${n} สมอง`, noMatch: 'ไม่มีสมองที่ชื่อตรงกับคำกรอง', noBrains: 'ยังไม่มีสมอง เก็บความจำแรกด้วย POST /v1/memories แล้วสมองจะปรากฏที่นี่',
     stWriting: 'กำลังเขียน', stExpiring: (n) => `ใกล้หมดอายุ ${n}`, stToday: 'เขียนวันนี้', stQuiet: 'เงียบ',
     justNow: 'เมื่อครู่', minAgo: (n) => `${n} นาทีที่แล้ว`, hrAgo: (n) => `${n} ชม.ที่แล้ว`, dayAgo: (n) => `${n} วันที่แล้ว`,
     spanD: (d, h) => `${d} วัน ${h} ชม.`, spanH: (h, m) => `${h} ชม. ${m} นาที`, spanM: (m) => `${m} นาที`,
-    tipLive: 'ความจำที่ใช้ได้', tipDay: 'เขียนใน 24 ชม.', tipLast: (a) => `เขียนล่าสุด ${a} · กดเพื่อเปิด`,
+    tipLive: 'ความจำที่ใช้ได้', tipDay: 'เขียนใน 24 ชม.', tipLast: (a) => `เขียนล่าสุด ${a} · กดเพื่อเลือกดู`,
     kBrains: 'สมองทั้งหมด', kBrainsNote: (n) => `กำลังเขียนอยู่ ${n} สมอง`, kLive: 'ความจำที่ใช้ได้', kLiveNote: (s, e) => `ถูกแทน ${s} · หมดอายุ ${e}`,
     kM60: 'เขียนใน 60 นาที', kH24: 'เขียนใน 24 ชั่วโมง', kFrom: (n) => `จาก ${n} สมอง`, kSrc: 'แหล่งข้อมูล', kSrcNote: (k, m) => `มีคีย์ ${k} · รวมซ้ำ ${m} ครั้ง`,
     kChars: 'ขนาดเนื้อหา', kCharsVal: (v) => `${v} ล้านตัวอักษร`, kCharsNote: (n) => `เฉลี่ย ${n} ตัวอักษรต่อความจำ`,
@@ -338,10 +363,12 @@ const L = {
     signals: 'Signals · last 90 seconds', receiving: 'Receiving data', idle: 'Idle',
     heroAria: '3D brain for the whole system. Each orb around it is one brain. Lights flying in are memories being written; lights flying out are search results.',
     connecting: 'Connecting…', watching: (n, b) => `Watching ${n} memories in ${b} brains`, orbsCap: (b) => `Showing 12 of ${b} brains; the rest are in the table`,
-    inbound: '↓ Inbound', outbound: 'Outbound ↑', itemsPerMin: 'items/min', timesPerMin: 'per min', stageHint: 'Drag to rotate · click an orb to open that brain',
+    inbound: '↓ Inbound', outbound: 'Outbound ↑', itemsPerMin: 'items/min', timesPerMin: 'per min', stageHint: 'Drag to rotate · click an orb to view that brain',
     sndTitle: 'Soundtrack', sndPlay: 'Play music', sndPause: 'Pause music', sndVol: 'Volume', sndSeek: 'Track position. Click, or use the left and right arrow keys, to seek',
     sndIdle: 'Press play for sound and the waveform', sndLoading: 'Loading the waveform', sndPlaying: 'Playing. Click the waveform to seek', sndPaused: 'Paused', sndError: 'Could not open the audio file',
-    navAria: 'Main pages', navBrain: 'Brain', navDash: 'Dashboard', to: 'to', scrollHint: 'Scroll the table sideways for the remaining columns',
+    spinStop: 'Stop rotation', spinGo: 'Rotate', nodeNoText: 'use an API key to read the text', nodeLoading: 'Loading the text…', pointsAll: (n) => `Memory points: all ${n} shown`, pointsSample: (n) => `Memory points: a ${n}-point sample, loading the rest…`, viewerBadge: 'View only, no key needed', useKey: 'Use an API key', cancel: 'Cancel', allBrains: 'All brains', brainsAria: 'Choose a brain to view',
+    open3d: 'Open this brain in 3D', open3dKey: 'Open in 3D (needs a key)', kBrain: 'Selected brain', watchingOne: (n, b) => `Watching ${n} memories in brain ${b}`,
+    navAria: 'Main pages', navWh: 'Warehouse', navBrain: 'Brain', navDash: 'Dashboard', to: 'to', scrollHint: 'Scroll the table sideways for the remaining columns',
     feedTitle: 'Memories in & out, live', dirIn: 'In', dirOut: 'Out', dirAbstain: 'Abstained', dirDel: 'Deleted',
     feedEmpty: 'No memories have gone in or out through this server yet. Writes and searches appear here as they happen.',
     items: (n) => `${n} items`, evNew: 'new', evReplaced: 'replaced', evMerged: 'merged', asked: 'Asked: ', found: (n) => `${n} memories found`,
@@ -353,14 +380,14 @@ const L = {
     writesSub: (name, total, peak, unit) => `${name} · ${total} in total · peak ${peak} ${unit}`, written: 'Written', now: 'now',
     searchTitle: 'Searches · last 60 minutes', answered: 'Answered', abstained: 'Abstained',
     searchSub: (n, a) => `${n} searches · ${a} abstained`, searchNone: 'No searches in the last hour · this counter resets when the server restarts',
-    tableTitle: 'Memory statistics · click a row to open the brain', kindFact: 'Fact', kindPref: 'Preference', kindEvent: 'Event', filterPh: 'Filter by brain name',
+    tableTitle: 'Memory statistics · click a row to view that brain', kindFact: 'Fact', kindPref: 'Preference', kindEvent: 'Event', filterPh: 'Filter by brain name',
     cBrain: 'Brain', cLive: 'Live memories', cShare: 'Share', cM60: '60 min', cH24: '24 h', cTrend: '24 h trend', cD30: '30 days', cMix: 'Kind', cKeyed: 'Keyed', cSources: 'Sources',
     cSuperseded: 'Superseded', cExpired: 'Expired', cMerges: 'Merges', cAvg: 'Avg length', cFirst: 'Started', cLast: 'Last write', cState: 'Status',
     chars: 'chars', total: (n) => `Total · ${n} brains`, noMatch: 'No brain matches that filter', noBrains: 'No brains yet. Store a first memory with POST /v1/memories and it will appear here.',
     stWriting: 'Writing now', stExpiring: (n) => `${n} expiring soon`, stToday: 'Written today', stQuiet: 'Quiet',
     justNow: 'just now', minAgo: (n) => `${n} min ago`, hrAgo: (n) => `${n} h ago`, dayAgo: (n) => `${n} d ago`,
     spanD: (d, h) => `${d} d ${h} h`, spanH: (h, m) => `${h} h ${m} min`, spanM: (m) => `${m} min`,
-    tipLive: 'Live memories', tipDay: 'Written in 24 h', tipLast: (a) => `Last write ${a} · click to open`,
+    tipLive: 'Live memories', tipDay: 'Written in 24 h', tipLast: (a) => `Last write ${a} · click to view`,
     kBrains: 'Brains', kBrainsNote: (n) => `${n} being written to now`, kLive: 'Live memories', kLiveNote: (s, e) => `${s} superseded · ${e} expired`,
     kM60: 'Written in 60 min', kH24: 'Written in 24 hours', kFrom: (n) => `across ${n} brains`, kSrc: 'Sources', kSrcNote: (k, m) => `${k} keyed · ${m} merges`,
     kChars: 'Content size', kCharsVal: (v) => `${v}M chars`, kCharsNote: (n) => `${n} chars per memory on average`,
@@ -381,6 +408,15 @@ function applyLang() {
 }
 
 let key = sessionStorage.getItem('panya.key') || '', data = null, timer = 0, evTimer = 0, paused = false, range = 'minute'
+// viewer = เปิดดูโดยไม่มี key (เซิร์ฟเวอร์เปิดโหมดแดชบอร์ดสาธารณะไว้) · ส่ง header เฉพาะเมื่อมี key
+let viewer = false
+const auth = () => (key ? { authorization: 'Bearer ' + key } : {})
+// สมองที่เลือกดู: ว่าง = ทุกสมอง · อยู่ใน URL (?brain=) จึงส่งลิงก์ให้คนอื่นเปิดสมองเดียวกันได้
+let sel = new URLSearchParams(location.search).get('brain') || ''
+const sfx = () => (sel ? '@' + sel : '')
+const pick = (d) => (sel ? d.brains.filter((b) => b.brain === sel) : d.brains)
+const zeroSearch = { total: 0, abstained: 0, avgMs: 0, minute: new Array(60).fill(0), abstainedMinute: new Array(60).fill(0) }
+const searchesOf = (d) => (!d.searches ? null : sel ? d.searches.brains?.[sel] ?? zeroSearch : d.searches)
 let sort = { key: 'live', dir: -1 }, filter = '', lastSeq = null
 
 // ---------- เวลา ----------
@@ -523,6 +559,8 @@ const shell = (() => {
 
 const hero = $('hero'), hx = hero.getContext('2d')
 const cam = { yaw: 0.7, pitch: -0.26 }
+// การหมุนเปิดเป็นค่าตั้งต้น (แม้ตั้งลดการเคลื่อนไหวไว้ เพราะหมุนช้ามาก) และจำค่าที่ผู้ใช้กดปุ่มไว้
+let spin = (() => { try { return localStorage.getItem('panya.spin') !== '0' } catch { return true } })()
 let W = 1, H = 1, dpr = 1, cx = 0, cy = 0, S = 1, cyaw = 1, syaw = 0, cpit = 1, spit = 0
 const DIST = 3.6, ORBIT = 1.35, ORBIT_Y = -0.92
 const o = { x: 0, y: 0, p: 1, z: 0 }
@@ -559,6 +597,89 @@ const shellPoint = (k = 1.03) => { const i = Math.floor(zr() * shell.cortex) * 4
 
 // สิ่งที่เคลื่อนไหวบนเวที
 let arcs = [], nextArc = 0, nextSurge = 3, surge = 0, heat = 0
+// ---------- จุดความจำจริงในเนื้อสมอง (แบบเดียวกับหน้า /brain) ----------
+// แกน PCA ที่หนึ่ง = หน้า-หลัง, ที่สอง = บน-ล่าง, ซีกซ้าย/ขวาและความลึกมาจากค่าแฮชของลำดับ
+const GROUP_COLORS = ['#4fd1c5', '#f6b352', '#6aa9ff', '#f08aa8', '#a78bfa', '#7ddc8a', '#ffd166', '#5eead4', '#fca5a5', '#93c5fd']
+const hashN = (i, k) => (((Math.sin(i * 12.9898 + k * 78.233) * 43758.5453) % 1) + 1) % 1
+function placeNodes(list) {
+  const n = list.length, idx = list.map((_, i) => i)
+  const rank = (key) => { const m = new Float32Array(n); idx.slice().sort((a, b) => list[a][key] - list[b][key]).forEach((id, r) => { m[id] = (r + 0.5) / n }); return m }
+  const rx = rank('x'), ry = rank('y')
+  list.forEach((nd, i) => {
+    const u = rx[i] * 2 - 1, v = ry[i] * 2 - 1
+    const z = u * Math.sqrt(1 - (v * v) / 2) * 0.9, yy = v * Math.sqrt(1 - (u * u) / 2) * 0.6
+    const half = 0.74 * Math.sqrt(Math.max(0.02, 1 - (yy / 0.68) ** 2 - z * z))
+    nd.X = (hashN(i, 1) < 0.5 ? -1 : 1) * (0.05 + Math.pow(hashN(i, 2), 0.7) * Math.max(0.02, half - 0.07))
+    nd.Y = yy + 0.05; nd.Z = z; nd.sx = 0; nd.sy = 0; nd.sp = 1; nd.fog = 1
+  })
+}
+let gNodes = [], gEdges = [], gPulses = [], gAt = 0, gFor = null, gLoading = false, hoverNode = -1
+// ถังสำหรับวาดจุดจำนวนมาก: สีละสองถัง (ด้านหลังจาง ด้านหน้าชัด)
+const nodeBuckets = GROUP_COLORS.flatMap(() => [[], []])
+const GROUP_RGBA = GROUP_COLORS.flatMap((hex) => { const n = parseInt(hex.slice(1), 16), rgb = `${n >> 16}, ${(n >> 8) & 255}, ${n & 255}`; return [`rgba(${rgb}, .32)`, `rgba(${rgb}, .9)`] })
+function setPointsLabel() {
+  $('hud-points').textContent = gFull ? t('pointsAll', num(gNodes.length)) : gNodes.length ? t('pointsSample', num(gNodes.length)) : ''
+}
+// ดึงแผนที่ของสมองที่เลือก หรือของทุกสมองโดยแบ่งจำนวนจุดกัน · ผู้ชมที่ไม่มี key ได้ตำแหน่งและหมวด ไม่ได้ข้อความ
+async function loadGraph() {
+  if (!data || gLoading) return
+  const want = sel ? [sel] : data.brains.map((b) => b.brain)
+  const forKey = want.join('\n'), per = Math.max(150, Math.floor(1200 / Math.max(1, want.length)))
+  gLoading = true
+  try {
+    const parts = await Promise.all(want.map((b) => fetch(`/v1/graph?brain=${encodeURIComponent(b)}&limit=${per}`, { headers: auth() }).then((r) => (r.ok ? r.json() : { nodes: [], edges: [] })).catch(() => ({ nodes: [], edges: [] }))))
+    if (forKey !== (sel ? sel : data.brains.map((b) => b.brain).join('\n'))) return // เลือกสมองอื่นไปแล้วระหว่างรอ
+    const nodes = [], edges = []
+    parts.forEach((p, k) => {
+      placeNodes(p.nodes)
+      const base = nodes.length
+      for (const nd of p.nodes) nodes.push({ ...nd, brain: want[k] })
+      for (const [a, b, s] of p.edges) edges.push([a + base, b + base, s])
+    })
+    const counts = new Map()
+    for (const nd of nodes) counts.set(nd.group, (counts.get(nd.group) || 0) + 1)
+    const color = new Map([...counts.entries()].sort((a, b) => b[1] - a[1]).map(([g], i) => [g, i % GROUP_COLORS.length]))
+    for (const nd of nodes) { nd.ci = color.get(nd.group); nd.color = GROUP_COLORS[nd.ci] }
+    // ถ้าชุดครบมาถึงก่อนแล้ว อย่าเอาตัวอย่างไปทับ
+    if (!(gFull && gFor === forKey)) { gNodes = nodes; gEdges = edges; gPulses = []; gFor = forKey; gFull = false; hoverNode = -1 }
+    gAt = Date.now(); setPointsLabel()
+  } finally { gLoading = false }
+  loadPoints(forKey, want)
+}
+// ทุกความจำของสมองที่เลือก (หรือทุกสมอง): เซิร์ฟเวอร์คำนวณครั้งแรกหลายวินาที จึงแสดงตัวอย่างไปก่อนแล้วค่อยสลับ
+let gFull = false, pointsLoading = ''
+async function loadPoints(forKey, want) {
+  if (pointsLoading === forKey) return
+  pointsLoading = forKey
+  try {
+    const parts = await Promise.all(want.map((b) => fetch(`/v1/points?brain=${encodeURIComponent(b)}`, { headers: auth() }).then((r) => (r.ok ? r.json() : null)).catch(() => null)))
+    if (forKey !== (sel ? sel : data.brains.map((b) => b.brain).join('\n')) || parts.some((p) => !p)) return
+    const nodes = [], edges = []
+    parts.forEach((p) => {
+      const list = p.ids.map((id, i) => ({ id, x: p.x[i], y: p.y[i], group: p.groups[p.g[i]], createdAt: p.t[i], count: p.c[i], brain: p.brain }))
+      placeNodes(list)
+      const base = nodes.length
+      for (const nd of list) nodes.push(nd)
+      for (const [a, b] of p.edges) edges.push([a + base, b + base])
+    })
+    const counts = new Map()
+    for (const nd of nodes) counts.set(nd.group, (counts.get(nd.group) || 0) + 1)
+    const color = new Map([...counts.entries()].sort((a, b) => b[1] - a[1]).map(([g], i) => [g, i % GROUP_COLORS.length]))
+    for (const nd of nodes) { nd.ci = color.get(nd.group); nd.color = GROUP_COLORS[nd.ci] }
+    gNodes = nodes; gEdges = edges; gPulses = []; gFor = forKey; gFull = true; hoverNode = -1; gAt = Date.now(); setPointsLabel()
+  } finally { if (pointsLoading === forKey) pointsLoading = '' }
+}
+// ข้อความของจุดที่ชี้ (ต้องมี key) ดึงทีละรายการเมื่อชี้ แล้วจำไว้
+const nodeText = new Map()
+async function fetchNodeText(nd) {
+  if (!key || nodeText.has(nd.id)) return
+  nodeText.set(nd.id, null)
+  try {
+    const r = await fetch(`/v1/memories/${encodeURIComponent(nd.id)}?brain=${encodeURIComponent(nd.brain)}`, { headers: auth() })
+    if (r.ok) nodeText.set(nd.id, (await r.json()).memory.text)
+  } catch {}
+}
+
 let orbs = []        // สมองแต่ละใบ: { name, a (มุมบนวงโคจร), live, heat, sx, sy, sr, fog }
 let motes = []       // จุดแสงที่วิ่งเข้า/ออก
 let sparks = []      // ความจำที่เพิ่งเข้ามา ติดสว่างอยู่ในเนื้อสมองแล้วค่อย ๆ จาง
@@ -570,7 +691,7 @@ const spawnArc = (t, a, b, hex) => {
 }
 // เหตุการณ์จริงหนึ่งรายการ → จุดแสงบนเวที (จำกัดจำนวนต่อเหตุการณ์ ไม่ให้ชุดใหญ่ท่วมจอ)
 function animateEvent(e, t) {
-  if (calm || $('app').hidden || document.hidden) return
+  if (calm || $('app').hidden || document.hidden || (sel && e.brain !== sel)) return
   const count = e.type === 'in' ? Math.min(28, Math.max(1, Math.ceil(Math.sqrt(e.n) * 2))) : e.type === 'out' ? Math.min(12, e.hits || 0) : 0
   for (let i = 0; i < count && motes.length < 420; i++) {
     motes.push({ type: e.type, brain: e.brain, u: -i * 0.035 - zr() * 0.15, dur: 1.5 + zr() * 0.7, edge: 0.18 + zr() * 0.64, target: shellPoint(0.25 + zr() * 0.7) })
@@ -587,7 +708,8 @@ function drawHero(t, dt) {
   if (!r.width) return
   dpr = Math.min(2, devicePixelRatio || 1); W = r.width; H = r.height
   if (hero.width !== Math.round(W * dpr) || hero.height !== Math.round(H * dpr)) { hero.width = Math.round(W * dpr); hero.height = Math.round(H * dpr) }
-  if (!calm && !drag.on && hoverOrb < 0) cam.yaw += dt * (0.11 + heat * 0.1)
+  // หมุนช้า ๆ ตลอด (รอบละราว 60 วินาที) · ชี้จุดความจำ = ชะลอให้อ่านทัน · ชี้ลูกทรงกลมหรือกำลังลาก = หยุด
+  if (spin && !drag.on && hoverOrb < 0) cam.yaw += dt * (0.1 + heat * 0.08) * (hoverNode >= 0 ? 0.3 : 1)
   cyaw = Math.cos(cam.yaw); syaw = Math.sin(cam.yaw); cpit = Math.cos(cam.pitch); spit = Math.sin(cam.pitch)
   cx = W / 2; cy = H * 0.47; S = Math.min(W * 0.24, H * 0.36)
   const g = hx
@@ -647,6 +769,51 @@ function drawHero(t, dt) {
     g.fill()
   }
 
+  // จุดความจำจริง เส้นเชื่อมความจำที่ความหมายใกล้กัน และสัญญาณที่วิ่งไปตามเส้น
+  if (gNodes.length) {
+    const unit = Math.max(0.7, S / 300)
+    for (const nd of gNodes) { const q = proj(nd.X, nd.Y, nd.Z); nd.sx = q.x; nd.sy = q.y; nd.sp = q.p; nd.fog = fogOf(q.z) }
+    g.lineWidth = 0.7; g.strokeStyle = 'rgba(110, 165, 255, .11)'; g.beginPath()
+    for (const [a, b] of gEdges) { const A = gNodes[a], B = gNodes[b]; g.moveTo(A.sx, A.sy); g.lineTo(B.sx, B.sy) }
+    g.stroke()
+    const want = calm ? 0 : Math.min(50, Math.ceil(gEdges.length / 24))
+    while (gPulses.length < want) gPulses.push({ e: Math.floor(zr() * gEdges.length), u: 0, v: 0.6 + zr() * 1.4, rev: zr() < 0.5 })
+    g.lineWidth = 1.3
+    gPulses = gPulses.filter((pl) => {
+      pl.u += dt * pl.v
+      const ed = gEdges[pl.e]
+      if (pl.u >= 1 || !ed) return false
+      const A = gNodes[pl.rev ? ed[1] : ed[0]], B = gNodes[pl.rev ? ed[0] : ed[1]], u0 = Math.max(0, pl.u - 0.18), f = (A.fog + B.fog) / 2
+      const x = A.sx + (B.sx - A.sx) * pl.u, y = A.sy + (B.sy - A.sy) * pl.u
+      g.strokeStyle = `rgba(190, 240, 255, ${0.65 * f})`
+      g.beginPath(); g.moveTo(A.sx + (B.sx - A.sx) * u0, A.sy + (B.sy - A.sy) * u0); g.lineTo(x, y); g.stroke()
+      g.globalAlpha = f; glow('#7fe3ff', x, y, 4.5 * A.sp); g.globalAlpha = 1
+      return true
+    })
+    if (gNodes.length > 2500) {
+      // จุดหลายหมื่นจุด: วาดเป็นสี่เหลี่ยมเล็กรวมชุดตามสีและด้านหน้า/หลัง เร็วกว่าภาพเรืองแสงทีละจุดมาก
+      for (const b of nodeBuckets) b.length = 0
+      for (const nd of gNodes) {
+        const s = (nd.count > 1 ? 2.2 : 1.6) * nd.sp * unit
+        nodeBuckets[nd.ci * 2 + (nd.fog > 0.62 ? 1 : 0)].push(nd.sx - s / 2, nd.sy - s / 2, s)
+      }
+      nodeBuckets.forEach((b, k) => {
+        if (!b.length) return
+        g.fillStyle = GROUP_RGBA[k]; g.beginPath()
+        for (let i = 0; i < b.length; i += 3) g.rect(b[i], b[i + 1], b[i + 2], b[i + 2])
+        g.fill()
+      })
+      if (hoverNode >= 0 && gNodes[hoverNode]) { const nd = gNodes[hoverNode]; glow(nd.color, nd.sx, nd.sy, 14 * nd.sp * unit) }
+    } else {
+      gNodes.forEach((nd, i) => {
+        const r = (2 + Math.min(3, Math.log2(1 + nd.count))) * nd.sp * unit * (i === hoverNode ? 1.8 : 1)
+        g.globalAlpha = i === hoverNode ? 1 : nd.fog
+        glow(nd.color, nd.sx, nd.sy, r * 3)
+      })
+      g.globalAlpha = 1
+    }
+  }
+
   // ความจำที่เพิ่งเข้ามา: จุดสว่างในเนื้อสมอง จางลงในราวหนึ่งนาที
   sparks = sparks.filter((s) => t - s.born < 60)
   for (const s of sparks) { const q = proj(s.p[0], s.p[1], s.p[2]), age = (t - s.born) / 60; g.globalAlpha = (1 - age) * fogOf(q.z); glow('#7db6ff', q.x, q.y, (age < 0.02 ? 16 : 6) * q.p) }
@@ -658,21 +825,25 @@ function drawHero(t, dt) {
     ob.sx = q.x; ob.sy = q.y; ob.fog = fogOf(q.z); ob.flash = (ob.flash || 0) * Math.exp(-dt * 3)
     ob.sr = (7 + 9 * ob.size) * q.p * Math.max(0.8, S / 240)
   }
+  // เมื่อเลือกสมองหนึ่ง ใบอื่นจางลง และใบที่เลือกมีวงสองชั้นกับป้ายชื่อเสมอ
   orbs.slice().sort((a, b) => a.fog - b.fog).forEach((ob) => {
-    const i = orbs.indexOf(ob), on = i === hoverOrb, pulse = calm ? 1 : 1 + 0.08 * Math.sin(t * 3 + ob.a * 5)
-    g.strokeStyle = `rgba(120, 190, 255, ${0.1 * ob.fog + ob.flash * 0.5})`; g.lineWidth = 1
+    const i = orbs.indexOf(ob), on = i === hoverOrb, picked = sel === ob.name, dim = sel && !picked ? 0.3 : 1
+    const pulse = calm ? 1 : 1 + (picked ? 0.14 : 0.08) * Math.sin(t * 3 + ob.a * 5)
+    g.strokeStyle = `rgba(120, 190, 255, ${(0.1 * ob.fog + ob.flash * 0.5 + (picked ? 0.35 : 0)) * dim})`; g.lineWidth = picked ? 1.6 : 1
     g.beginPath(); g.moveTo(ob.sx, ob.sy); g.lineTo(cx, cy); g.stroke()
-    g.globalAlpha = Math.min(1, ob.fog * (0.55 + ob.heat * 0.45) + ob.flash + (on ? 0.4 : 0))
-    glow(ob.heat > 0 ? '#7fe3ff' : '#5b8fe0', ob.sx, ob.sy, ob.sr * (2.1 + ob.flash * 1.6) * pulse)
+    g.globalAlpha = Math.min(1, (ob.fog * (0.55 + ob.heat * 0.45) + ob.flash + (on || picked ? 0.4 : 0)) * dim)
+    glow(ob.heat > 0 || picked ? '#7fe3ff' : '#5b8fe0', ob.sx, ob.sy, ob.sr * (2.1 + ob.flash * 1.6 + (picked ? 0.6 : 0)) * pulse)
     g.globalAlpha = 1
-    g.strokeStyle = `rgba(200, 235, 255, ${(on ? 0.95 : 0.45) * ob.fog})`; g.lineWidth = on ? 1.6 : 1
+    g.strokeStyle = `rgba(200, 235, 255, ${(on || picked ? 0.95 : 0.45) * ob.fog * dim})`; g.lineWidth = on || picked ? 1.6 : 1
     g.beginPath(); g.arc(ob.sx, ob.sy, ob.sr * 1.25, 0, TAU); g.stroke()
+    if (picked) { g.setLineDash([3, 4]); g.lineDashOffset = calm ? 0 : -t * 14; g.beginPath(); g.arc(ob.sx, ob.sy, ob.sr * 1.7, 0, TAU); g.stroke(); g.setLineDash([]) }
   })
   // ป้ายชื่อ: ตัวหนังสือใช้สีตัวอักษร ไม่ใช้สีของชุดข้อมูล
   g.globalCompositeOperation = 'source-over'; g.textAlign = 'center'; g.textBaseline = 'top'
   orbs.forEach((ob, i) => {
-    if (ob.fog < 0.42 && i !== hoverOrb) return
-    const a = i === hoverOrb ? 1 : Math.min(1, (ob.fog - 0.3) * 1.6), y = ob.sy + ob.sr * 1.25 + 5
+    const picked = sel === ob.name
+    if (ob.fog < 0.42 && i !== hoverOrb && !picked) return
+    const a = (i === hoverOrb || picked ? 1 : Math.min(1, (ob.fog - 0.3) * 1.6)) * (sel && !picked ? 0.45 : 1), y = ob.sy + ob.sr * (picked ? 1.7 : 1.25) + 5
     g.font = '600 12px "Leelawadee UI", "Noto Sans Thai", Tahoma, sans-serif'; g.fillStyle = `rgba(232, 238, 249, ${a})`
     g.fillText(ob.name.length > 22 ? ob.name.slice(0, 21) + '…' : ob.name, ob.sx, y)
     g.font = '11px "Leelawadee UI", "Noto Sans Thai", Tahoma, sans-serif'; g.fillStyle = `rgba(157, 176, 208, ${a})`
@@ -737,7 +908,23 @@ hero.addEventListener('pointermove', (ev) => {
     return
   }
   hoverOrb = pickOrb(ev)
+  // ไม่ได้ชี้ลูกทรงกลม: ดูว่าชี้จุดความจำไหม (จุดด้านหน้าได้ก่อน)
+  hoverNode = -1
+  if (hoverOrb < 0 && gNodes.length) {
+    const r = hero.getBoundingClientRect(), x = ev.clientX - r.left, y = ev.clientY - r.top
+    let bd = 11 * 11
+    gNodes.forEach((nd, i) => { const d = ((nd.sx - x) ** 2 + (nd.sy - y) ** 2) * (1.7 - 0.7 * nd.fog); if (d < bd) { bd = d; hoverNode = i } })
+  }
   hero.classList.toggle('pointing', hoverOrb >= 0)
+  if (hoverNode >= 0) {
+    const nd = gNodes[hoverNode], when = new Date(nd.createdAt).toLocaleDateString(loc(), { day: 'numeric', month: 'short', year: '2-digit' })
+    // ข้อความ: มากับตัวอย่างเมื่อมี key, หรือดึงทีละจุดเมื่อเป็นชุดครบ · ไม่มี key = เห็นแค่หมวดและวันที่
+    const text = nd.text || nodeText.get(nd.id)
+    if (!text && key && !nodeText.has(nd.id)) { const idx = hoverNode, at = { clientX: ev.clientX, clientY: ev.clientY }; fetchNodeText(nd).then(() => { if (hoverNode === idx) hero.dispatchEvent(new PointerEvent('pointermove', at)) }) }
+    const body = text ? esc(text.length > 280 ? text.slice(0, 279) + '…' : text) : `<i style="background:${nd.color}"></i>${esc(nd.group)}`
+    const note = text ? '' : ' · ' + t(key ? 'nodeLoading' : 'nodeNoText')
+    return showTip(`${body}<small>${esc(nd.brain)} · ${esc(nd.group)} · ${when}${note}</small>`, ev.clientX, ev.clientY)
+  }
   const b = hoverOrb >= 0 && data && data.brains.find((x) => x.brain === orbs[hoverOrb].name)
   if (!b) return hideTip()
   showTip(`<b>${esc(b.brain)}</b><div>${t('tipLive')} <b>${num(b.live)}</b></div><div>${t('tipDay')} <b>${num(sum(b.hour))}</b></div><small>${t('tipLast', ago(b.lastAt, data.now))}</small>`, ev.clientX, ev.clientY)
@@ -747,10 +934,11 @@ const endDrag = (ev) => {
   drag.on = false; hero.classList.remove('dragging')
   if (drag.moved || ev.type === 'pointercancel') return
   const i = pickOrb(ev)
-  if (i >= 0) openBrain(orbs[i].name)
+  // กดลูกทรงกลม = เลือกดูสมองนั้น · กดใบที่เลือกอยู่ซ้ำ = กลับไปดูทุกสมอง
+  if (i >= 0) setBrain(orbs[i].name === sel ? '' : orbs[i].name)
 }
 hero.addEventListener('pointerup', endDrag); hero.addEventListener('pointercancel', endDrag)
-hero.addEventListener('pointerleave', () => { if (!drag.on) { hoverOrb = -1; hideTip(); hero.classList.remove('pointing') } })
+hero.addEventListener('pointerleave', () => { if (!drag.on) { hoverOrb = -1; hoverNode = -1; hideTip(); hero.classList.remove('pointing') } })
 
 // ---------- แถบคลื่นสัญญาณ ----------
 const ecg = { buf: new Float32Array(0), head: 0, phase: 0, acc: 0, bpm: 36, amp: 0.35 }
@@ -807,9 +995,9 @@ let channels = []
 function buildStrips(names) {
   const defs = [
     { id: 'ecg', label: t('chPulse'), color: '#96e8ff', unit: '' },
-    { id: 'in', label: t('chIn'), color: C.in, rgb: '125, 182, 255', unit: 'itemsPerMin' },
-    { id: 'out', label: t('chOut'), color: C.out, rgb: '79, 211, 164', unit: 'timesPerMin' },
-    { id: 'abstain', label: t('chAbstain'), color: C.abstain, rgb: '240, 140, 96', unit: 'timesPerMin' },
+    { id: 'in' + sfx(), label: t('chIn'), color: C.in, rgb: '125, 182, 255', unit: 'itemsPerMin' },
+    { id: 'out' + sfx(), label: t('chOut'), color: C.out, rgb: '79, 211, 164', unit: 'timesPerMin' },
+    { id: 'abstain' + sfx(), label: t('chAbstain'), color: C.abstain, rgb: '240, 140, 96', unit: 'timesPerMin' },
     ...names.map((n) => ({ id: 'b:' + n, label: n, color: C.in, rgb: '125, 182, 255', unit: 'itemsPerMin' })),
   ]
   $('strips').innerHTML = defs.map((d) => `<div class="strip"><div class="lab"><span><i style="background:${d.color}"></i>${esc(d.label)}</span><b></b></div><canvas aria-hidden="true"></canvas></div>`).join('')
@@ -935,12 +1123,12 @@ function setNum(el, to, fmt = num) {
 }
 
 function renderKpis(d) {
-  const b = d.brains, now = d.now
+  const b = pick(d), now = d.now
   const live = sum(b.map((x) => x.live)), m60 = sum(b.map((x) => sum(x.minute))), h24 = sum(b.map((x) => sum(x.hour)))
   const active = b.filter((x) => now - x.lastAt < 5 * 60000).length, chars = sum(b.map((x) => x.chars))
-  const s = d.searches, sv = d.server, hidden = t('kHidden')
+  const s = searchesOf(d), sv = d.server, hidden = t('kHidden')
   const tiles = [
-    ['brains', t('kBrains'), b.length, t('kBrainsNote', num(active))],
+    sel && b[0] ? ['brains', t('kBrain'), sel, stateOf(b[0], now).text] : ['brains', t('kBrains'), d.brains.length, t('kBrainsNote', num(active))],
     ['live', t('kLive'), live, t('kLiveNote', num(sum(b.map((x) => x.superseded))), num(sum(b.map((x) => x.expired))))],
     ['m60', t('kM60'), m60, t('kFrom', num(b.filter((x) => sum(x.minute)).length))],
     ['h24', t('kH24'), h24, t('kFrom', num(b.filter((x) => sum(x.hour)).length))],
@@ -950,8 +1138,9 @@ function renderKpis(d) {
     ['up', t('kUp'), sv ? span(now - sv.startedAt) : null, sv ? t('kUpNote', num(sv.rssMb), num(sv.scanMs)) : hidden],
   ]
   if (!$('kpis').children.length) $('kpis').innerHTML = tiles.map(([id, label]) => `<div class="kpi"><small>${label}</small><strong id="k-${id}">-</strong><em id="e-${id}"></em></div>`).join('')
-  for (const [id, , value, note, fmt] of tiles) {
-    if (typeof value === 'number') setNum($('k-' + id), value, fmt); else $('k-' + id).textContent = value ?? '-'
+  for (const [id, label, value, note, fmt] of tiles) {
+    $('k-' + id).previousElementSibling.textContent = label
+    if (typeof value === 'number') setNum($('k-' + id), value, fmt); else { tween.delete($('k-' + id)); $('k-' + id).textContent = value ?? '-' }
     $('e-' + id).textContent = note; $('e-' + id).title = note
   }
   if (fmtSmall) fmtSmall()
@@ -959,19 +1148,24 @@ function renderKpis(d) {
 // หน่วยของตัวเลขขนาดเนื้อหาเล็กกว่าตัวเลข
 const fmtSmall = () => { const el = $('k-chars'); if (el) el.style.fontSize = '20px' }
 
+let stripKey = ''
 function renderStage(d) {
-  const b = d.brains, now = d.now
-  // วงโคจรแสดงได้ 12 ใบ เรียงตามจำนวนความจำ ที่เหลือดูได้ในตาราง
-  const top = b.slice().sort((x, y) => y.live - x.live).slice(0, 12), maxLive = Math.max(...top.map((x) => x.live), 1)
+  const all = d.brains, b = pick(d), now = d.now
+  // วงโคจรแสดงได้ 12 ใบ เรียงตามจำนวนความจำ (สมองที่เลือกอยู่ในวงเสมอ) ที่เหลือดูได้ในตาราง
+  let top = all.slice().sort((x, y) => y.live - x.live).slice(0, 12)
+  if (sel && !top.some((x) => x.brain === sel) && b[0]) top = [...top.slice(0, 11), b[0]]
+  const maxLive = Math.max(...top.map((x) => x.live), 1)
   const old = new Map(orbs.map((x) => [x.name, x]))
   orbs = top.map((x, i) => ({
     ...(old.get(x.brain) || { flash: 0, sx: 0, sy: 0, sr: 10, fog: 1 }), name: x.brain, a: (i / top.length) * TAU, live: x.live,
     size: Math.log10(1 + x.live) / Math.log10(1 + maxLive), heat: Math.min(1, Math.log10(1 + sum(x.minute.slice(-5))) / 3),
   }))
-  $('hud-line').textContent = t('watching', num(sum(b.map((x) => x.live))), num(b.length))
-  $('hud-orbs').textContent = b.length > 12 ? t('orbsCap', num(b.length)) : ''
-  const names = top.slice().sort((x, y) => y.lastAt - x.lastAt).slice(0, 4).map((x) => x.brain)
-  if (names.join('\n') !== channels.slice(4).map((c) => c.label).join('\n') || !channels.length) buildStrips(names)
+  $('hud-line').textContent = sel ? t('watchingOne', num(sum(b.map((x) => x.live))), sel) : t('watching', num(sum(b.map((x) => x.live))), num(b.length))
+  $('hud-orbs').textContent = all.length > 12 ? t('orbsCap', num(all.length)) : ''
+  // แถบสัญญาณรายสมองแสดงเมื่อดูทุกสมอง ถ้าเลือกสมองเดียว แถบเข้า/ออกด้านบนเป็นของสมองนั้นอยู่แล้ว
+  const names = sel ? [] : top.slice().sort((x, y) => y.lastAt - x.lastAt).slice(0, 4).map((x) => x.brain)
+  const k = sel + '|' + names.join('\n')
+  if (k !== stripKey || !channels.length) { buildStrips(names); stripKey = k }
   // ชีพจรรวมใช้อัตราเขียนเฉลี่ย 5 นาทีจากฐานข้อมูล จึงนับการเขียนที่ไม่ได้ผ่านเซิร์ฟเวอร์นี้ด้วย
   const perMin = b.reduce((acc, x) => acc + sum(x.minute.slice(-5)), 0) / 5
   ecg.bpm = Math.min(150, 36 + 28 * Math.log10(1 + perMin * 4)); ecg.amp = Math.min(1, 0.35 + 0.2 * Math.log10(1 + perMin))
@@ -980,7 +1174,7 @@ function renderStage(d) {
 }
 // ตัวเลขที่เปลี่ยนทุกวินาที: อัตราเข้า/ออกจากเหตุการณ์สด
 function renderRates() {
-  const now = serverNow(), rin = perMinute('in', now), rout = perMinute('out', now) + perMinute('abstain', now)
+  const now = serverNow(), rin = perMinute('in' + sfx(), now), rout = perMinute('out' + sfx(), now) + perMinute('abstain' + sfx(), now)
   setNum($('in-rate'), rin); setNum($('out-rate'), rout)
   heat += (Math.min(1, Math.log10(1 + rin + rout * 4) / 3) - heat) * 0.3
   for (const ch of channels) if (ch.id !== 'ecg') ch.out.textContent = num(perMinute(ch.id, now)) + ' ' + t(ch.unit)
@@ -989,7 +1183,7 @@ function renderRates() {
 
 function renderCharts(d) {
   const r = RANGES[range], now = d.now
-  const values = Array.from({ length: r.n }, (_, i) => sum(d.brains.map((b) => b[range][i])))
+  const values = Array.from({ length: r.n }, (_, i) => sum(pick(d).map((b) => b[range][i])))
   const starts = values.map((_, i) => bucketStart(r, i, now))
   chart($('writes'), {
     series: [{ name: t('written'), color: C.in, values }], labels: starts.map(r.label),
@@ -998,7 +1192,7 @@ function renderCharts(d) {
   $('writes-sub').textContent = t('writesSub', t(r.name), num(sum(values)), num(Math.max(...values)), t(r.unit))
   $('search-panel').hidden = !d.searches
   if (d.searches) {
-    const s = d.searches, m = RANGES.minute, st = s.minute.map((_, i) => bucketStart(m, i, now))
+    const s = searchesOf(d), m = RANGES.minute, st = s.minute.map((_, i) => bucketStart(m, i, now))
     chart($('searches'), {
       series: [{ name: t('answered'), color: C.out, values: s.minute.map((v, i) => v - s.abstainedMinute[i]) }, { name: t('abstained'), color: C.abstain, values: s.abstainedMinute }],
       labels: st.map(m.label), titles: st.map((ms) => `${clock(ms)} ${t('to')} ${clock(ms + m.size)}`),
@@ -1055,7 +1249,7 @@ function renderTable(d) {
     b.live ? num(b.chars / b.live) + ' ' + t('chars') : '-', day(b.firstAt), ago(b.lastAt, now), stateHtml(stateOf(b, now)),
   ]
   $('table').tBodies[0].innerHTML = rows.length
-    ? rows.map((b) => `<tr data-brain="${esc(b.brain)}" tabindex="0">` + cells(b).map((v, i) => `<td${COLS[i].l ? ' class="l"' : ''}>${v}</td>`).join('') + '</tr>').join('')
+    ? rows.map((b) => `<tr data-brain="${esc(b.brain)}" tabindex="0"${b.brain === sel ? ' class="on" aria-selected="true"' : ''}>` + cells(b).map((v, i) => `<td${COLS[i].l ? ' class="l"' : ''}>${v}</td>`).join('') + '</tr>').join('')
     : `<tr><td class="l" colspan="${COLS.length}"><span class="empty">${d.brains.length ? t('noMatch') : t('noBrains')}</span></td></tr>`
   const tot = (f) => num(sum(rows.map(f)))
   const kinds = rows.reduce((a, b) => ({ fact: a.fact + b.kinds.fact, preference: a.preference + b.kinds.preference, event: a.event + b.kinds.event }), { fact: 0, preference: 0, event: 0 })
@@ -1074,9 +1268,31 @@ function markScroll() {
 }
 $('scroll').addEventListener('scroll', markScroll, { passive: true })
 
+// ตัวเลือกสมอง: ปุ่ม "ทุกสมอง" และปุ่มของแต่ละสมอง (จุดเขียวคือกำลังเขียนใน 5 นาทีล่าสุด)
+function renderSwitcher(d) {
+  if (sel && !d.brains.some((b) => b.brain === sel)) sel = ''
+  const chip = (name, label, count, live) =>
+    `<button type="button" data-brain="${esc(name)}" aria-pressed="${name === sel}"><i class="${live ? 'live' : ''}" aria-hidden="true"></i>${esc(label)}<small>${num(count)}</small></button>`
+  $('brains').innerHTML = chip('', t('allBrains'), sum(d.brains.map((b) => b.live)), d.brains.some((b) => d.now - b.lastAt < 5 * 60000)) +
+    d.brains.map((b) => chip(b.brain, b.brain, b.live, d.now - b.lastAt < 5 * 60000)).join('')
+  $('open3d').hidden = !sel
+  $('open3d').textContent = t(viewer && !key ? 'open3dKey' : 'open3d')
+}
+function setBrain(name) {
+  if (name === sel) return
+  sel = name
+  const u = new URL(location.href)
+  if (sel) u.searchParams.set('brain', sel); else u.searchParams.delete('brain')
+  history.replaceState(null, '', u)
+  redrawFeed(); motes = []; gNodes = []; gEdges = []; gPulses = []
+  render(); loadGraph()
+}
+$('brains').addEventListener('click', (ev) => { const b = ev.target.closest('button[data-brain]'); if (b) setBrain(b.dataset.brain) })
+$('open3d').addEventListener('click', () => { if (sel) openBrain(sel) })
+
 function render() {
   if (!data) return
-  renderKpis(data); renderStage(data); renderRates(); renderCharts(data); renderTable(data); markScroll()
+  renderSwitcher(data); renderKpis(data); renderStage(data); renderRates(); renderCharts(data); renderTable(data); markScroll()
 }
 
 // ---------- ฟีดสด ----------
@@ -1098,9 +1314,11 @@ function takeEvents(list, animate) {
   const feed = $('feed')
   if (list.length) feed.querySelector('.empty')?.remove()
   for (const e of list) {
-    addSignal(e.type === 'in' ? 'in' : e.type === 'out' ? (e.abstained ? 'abstain' : 'out') : 'del', e.at, e.type === 'in' ? e.n : 1)
+    // นับทั้งรวมทุกสมอง และแยกต่อสมอง (ต่อท้ายด้วย @ชื่อสมอง) เพื่อให้สลับดูได้ทันทีโดยไม่ต้องรอข้อมูลใหม่
+    const kind = e.type === 'in' ? 'in' : e.type === 'out' ? (e.abstained ? 'abstain' : 'out') : 'del', n = e.type === 'in' ? e.n : 1
+    addSignal(kind, e.at, n); addSignal(kind + '@' + e.brain, e.at, n)
     if (e.type === 'in') addSignal('b:' + e.brain, e.at, e.n)
-    feed.prepend(feedItem(e))
+    if (!sel || e.brain === sel) feed.prepend(feedItem(e))
     if (animate) animateEvent(e, T)
   }
   recent = recent.concat(list).slice(-80)
@@ -1108,14 +1326,15 @@ function takeEvents(list, animate) {
   if (!feed.children.length) feed.innerHTML = `<li class="empty">${esc(t('feedEmpty'))}</li>`
 }
 function redrawFeed() {
-  $('feed').innerHTML = recent.length ? '' : `<li class="empty">${esc(t('feedEmpty'))}</li>`
-  for (const e of recent) $('feed').prepend(feedItem(e))
+  const shown = recent.filter((e) => !sel || e.brain === sel)
+  $('feed').innerHTML = shown.length ? '' : `<li class="empty">${esc(t('feedEmpty'))}</li>`
+  for (const e of shown) $('feed').prepend(feedItem(e))
 }
 async function pollEvents() {
   clearTimeout(evTimer)
-  if (paused || !key) return
+  if (paused) return
   try {
-    const res = await fetch('/v1/events' + (lastSeq === null ? '' : '?after=' + lastSeq), { headers: { authorization: 'Bearer ' + key } })
+    const res = await fetch('/v1/events' + (lastSeq === null ? '' : '?after=' + lastSeq), { headers: auth() })
     if (res.ok) {
       const j = await res.json()
       clockSkew = j.now - Date.now()
@@ -1131,7 +1350,7 @@ async function pollEvents() {
 
 // ---------- ข้อมูล ----------
 async function load() {
-  const res = await fetch('/v1/overview', { headers: { authorization: 'Bearer ' + key } })
+  const res = await fetch('/v1/overview', { headers: auth() })
   if (res.status === 401) throw Object.assign(new Error(t('badKey')), { auth: true })
   if (!res.ok) throw new Error(t('serverSays', res.status))
   data = await res.json()
@@ -1143,31 +1362,55 @@ const stamp = () => setLive('', 'liveAt', new Date().toLocaleTimeString(loc(), {
 async function tick() {
   clearTimeout(timer)
   if (paused) return
-  try { await load(); render(); stamp() } catch (e) {
+  try {
+    await load(); render(); stamp()
+    // แผนที่ความจำ: ทุก 60 วินาที หรือเมื่อรายชื่อสมองเปลี่ยน
+    if (Date.now() - gAt > 60000 || gFor !== (sel ? sel : data.brains.map((b) => b.brain).join('\n'))) loadGraph()
+  } catch (e) {
     if (e.auth) return signOut(e.message)
     setLive('off', 'offline', e.message)
   }
   timer = setTimeout(tick, POLL)
 }
-function signOut(message) {
-  clearTimeout(timer); clearTimeout(evTimer); sessionStorage.removeItem('panya.key'); key = ''; data = null; lastSeq = null; recent = []
-  $('app').hidden = true; $('gate').style.display = ''; $('pause').hidden = true; $('logout').hidden = true; $('feed').innerHTML = ''
+// หน้าล็อกอิน: ปุ่มยกเลิกมีเฉพาะเมื่อดูแบบไม่มี key ได้อยู่แล้ว
+function showGate(message) {
+  $('gate').style.display = ''; $('err').textContent = message || ''
+  $('gate-cancel').hidden = !(viewer && data)
+  $('key').focus()
+}
+function stopAll() {
+  clearTimeout(timer); clearTimeout(evTimer); data = null; lastSeq = null; recent = []
+  $('app').hidden = true; $('pause').hidden = true; $('logout').hidden = true; $('use-key').hidden = true; $('viewer').hidden = true; $('feed').innerHTML = ''
   audio.pause(); $('player').hidden = true
-  $('err').textContent = message || ''; setLive('paused', 'waitLogin')
+  setLive('paused', 'waitLogin')
+}
+// ออกจากระบบ หรือ key ใช้ไม่ได้: ล้าง key แล้วลองเปิดแบบไม่มี key ก่อน ถ้าเซิร์ฟเวอร์ไม่เปิดให้จึงแสดงหน้าล็อกอิน
+function signOut(message) {
+  sessionStorage.removeItem('panya.key'); key = ''; viewer = false
+  stopAll(); start(message)
 }
 async function signIn() {
   await load()
-  sessionStorage.setItem('panya.key', key)
-  $('gate').style.display = 'none'; $('app').hidden = false; $('pause').hidden = false; $('logout').hidden = false; $('player').hidden = false
-  render(); stamp()
-  timer = setTimeout(tick, POLL); pollEvents()
+  viewer = data.viewer === true
+  if (key) sessionStorage.setItem('panya.key', key)
+  $('gate').style.display = 'none'; $('app').hidden = false; $('pause').hidden = false; $('player').hidden = false
+  $('logout').hidden = !key; $('viewer').hidden = !(viewer && !key); $('use-key').hidden = !(viewer && !key)
+  render(); stamp(); gFor = null; loadGraph()
+  clearTimeout(timer); timer = setTimeout(tick, POLL); pollEvents()
 }
+async function start(message) {
+  try { await signIn() } catch (e) { stopAll(); showGate(message || (e.auth && !key ? '' : e.message)) }
+}
+$('use-key').addEventListener('click', () => showGate(''))
+$('gate-cancel').addEventListener('click', () => { $('gate').style.display = 'none' })
 
 $('login').addEventListener('submit', async (ev) => {
   ev.preventDefault()
+  // key ผิดระหว่างที่ดูแบบไม่มี key อยู่: คืนค่าเดิม หน้าแดชบอร์ดด้านหลังยังทำงานต่อ
+  const before = key
   key = $('key').value.trim(); $('err').textContent = ''
   const btn = $('enter'); btn.disabled = true; btn.textContent = t('signingIn')
-  try { await signIn() } catch (e) { $('err').textContent = e.message } finally { btn.disabled = false; btn.textContent = t('signIn') }
+  try { await signIn() } catch (e) { key = before; $('err').textContent = e.message } finally { btn.disabled = false; btn.textContent = t('signIn') }
 })
 $('logout').addEventListener('click', () => signOut())
 $('pause').addEventListener('click', () => {
@@ -1180,11 +1423,13 @@ function setLang(next) {
   lang = next; localStorage.setItem('panya.lang', lang)
   applyLang()
   $('pause').textContent = t(paused ? 'resume' : 'pause'); $('hud-line').textContent = t('connecting'); $('err').textContent = ''
-  setLive(...liveState); setSnd(snd.state)
+  setLive(...liveState); setSnd(snd.state); if (typeof showSpin === 'function') showSpin()
   $('kpis').innerHTML = ''; channels = []; $('strips').innerHTML = ''
   redrawFeed(); render()
 }
 $('lang').addEventListener('click', () => setLang(lang === 'th' ? 'en' : 'th'))
+const showSpin = () => { $('spin').textContent = t(spin ? 'spinStop' : 'spinGo'); $('spin').setAttribute('aria-pressed', String(spin)) }
+$('spin').addEventListener('click', () => { spin = !spin; try { localStorage.setItem('panya.spin', spin ? '1' : '0') } catch {}; showSpin() })
 for (const b of document.querySelectorAll('.tabs button')) b.addEventListener('click', () => {
   range = b.dataset.range
   for (const x of document.querySelectorAll('.tabs button')) x.setAttribute('aria-pressed', String(x === b))
@@ -1194,14 +1439,15 @@ $('filter').addEventListener('input', () => { filter = $('filter').value.trim().
 const sortBy = (k) => { sort = { key: k, dir: sort.key === k ? -sort.dir : k === 'brain' ? 1 : -1 }; if (data) renderTable(data) }
 $('table').tHead.addEventListener('click', (ev) => { const th = ev.target.closest('th'); if (th) sortBy(th.dataset.key) })
 $('table').tHead.addEventListener('keydown', (ev) => { const th = ev.target.closest('th'); if (th && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); sortBy(th.dataset.key) } })
-$('table').tBodies[0].addEventListener('click', (ev) => { const tr = ev.target.closest('tr[data-brain]'); if (tr) openBrain(tr.dataset.brain) })
-$('table').tBodies[0].addEventListener('keydown', (ev) => { const tr = ev.target.closest('tr[data-brain]'); if (tr && ev.key === 'Enter') openBrain(tr.dataset.brain) })
+const pickRow = (tr) => { setBrain(tr.dataset.brain === sel ? '' : tr.dataset.brain); scrollTo({ top: 0, behavior: calm ? 'auto' : 'smooth' }) }
+$('table').tBodies[0].addEventListener('click', (ev) => { const tr = ev.target.closest('tr[data-brain]'); if (tr) pickRow(tr) })
+$('table').tBodies[0].addEventListener('keydown', (ev) => { const tr = ev.target.closest('tr[data-brain]'); if (tr && ev.key === 'Enter') pickRow(tr) })
 addEventListener('resize', () => { paint($('writes')); paint($('searches')); markScroll() })
-document.addEventListener('visibilitychange', () => { if (!document.hidden && key && !paused && !$('app').hidden) { tick(); pollEvents() } })
+document.addEventListener('visibilitychange', () => { if (!document.hidden && data && !paused && !$('app').hidden) { tick(); pollEvents() } })
 
 setLang(lang)
 requestAnimationFrame(frame)
-if (key) signIn().catch((e) => signOut(e.auth ? '' : e.message))
+start()
 </script>
 </body>
 </html>

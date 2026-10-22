@@ -89,7 +89,7 @@
 <body>
 <header>
   <h1><b>panya</b> <span data-i18n="subtitle"></span></h1>
-  <nav class="nav" data-i18n-aria="navAria"><a href="/brain" aria-current="page" data-i18n="navBrain"></a><a href="/dashboard" data-i18n="dashboard"></a></nav>
+  <nav class="nav" data-i18n-aria="navAria"><a href="/brain" aria-current="page" data-i18n="navBrain"></a><a href="/dashboard" data-i18n="dashboard"></a><a href="/warehouse" data-i18n="navWh"></a></nav>
   <form id="search">
     <input id="q" data-i18n-ph="qPh" data-i18n-aria="qAria" autocomplete="off">
     <button class="primary" id="go" data-i18n="go"></button>
@@ -135,7 +135,7 @@ const calm = matchMedia('(prefers-reduced-motion: reduce)').matches
 // ภาษาที่เลือกจำไว้ในเบราว์เซอร์และใช้ร่วมกับหน้า /dashboard · ค่าเป็นข้อความ หรือฟังก์ชันเมื่อมีตัวเลขแทรก
 const L = {
   th: {
-    title: 'panya · สมองที่สอง', subtitle: '· สมองที่สอง', other: 'EN', otherAria: 'Switch to English', navAria: 'หน้าหลัก', navBrain: 'สมอง',
+    title: 'panya · สมองที่สอง', subtitle: '· สมองที่สอง', other: 'EN', otherAria: 'Switch to English', navAria: 'หน้าหลัก', navWh: 'คลังสินค้า', navBrain: 'สมอง',
     qPh: 'ถามความจำ เช่น ท่าไหนปิดซ่อม', qAria: 'คำถาม', go: 'ค้น', searching: 'กำลังค้น…', dashboard: 'แดชบอร์ด', export: 'ส่งออก', exporting: 'กำลังส่งออก…',
     signOut: 'ออกจากระบบ', signIn: 'เข้าสู่ระบบ', signingIn: 'กำลังเข้าสู่ระบบ…', brainPh: 'ชื่อสมอง (brain)',
     canvasAria: 'ภาพสมองสามมิติ แต่ละจุดคือความจำหนึ่งรายการ', spinStop: 'หยุดหมุน', spinGo: 'หมุนต่อ', hint: 'ลากเพื่อหมุน · ล้อเมาส์เพื่อซูม · แตะจุดเพื่ออ่านความจำ',
@@ -147,7 +147,7 @@ const L = {
     stats: (n, e, b) => `${n} ความจำ · ${e} เส้นเชื่อม · ${b}`, badKey: 'API key ไม่ถูกต้อง', wrongBrain: 'key นี้ใช้กับสมองนี้ไม่ได้', serverSays: (n) => `เซิร์ฟเวอร์ตอบ ${n}`, raw: (m) => m,
   },
   en: {
-    title: 'panya · Second Brain', subtitle: '· Second Brain', other: 'ไทย', otherAria: 'เปลี่ยนเป็นภาษาไทย', navAria: 'Main pages', navBrain: 'Brain',
+    title: 'panya · Second Brain', subtitle: '· Second Brain', other: 'ไทย', otherAria: 'เปลี่ยนเป็นภาษาไทย', navAria: 'Main pages', navWh: 'Warehouse', navBrain: 'Brain',
     qPh: 'Ask the memory, e.g. which dock is closed', qAria: 'Question', go: 'Search', searching: 'Searching…', dashboard: 'Dashboard', export: 'Export', exporting: 'Exporting…',
     signOut: 'Sign out', signIn: 'Sign in', signingIn: 'Signing in…', brainPh: 'Brain name',
     canvasAria: '3D brain. Each point is one memory.', spinStop: 'Stop rotation', spinGo: 'Rotate', hint: 'Drag to rotate · scroll to zoom · tap a point to read the memory',
@@ -210,7 +210,7 @@ const shell = (() => {
 })()
 
 // ---------- กล้อง ----------
-const cam = { yaw: 0.7, pitch: -0.2, zoom: 1, spin: !calm }
+const cam = { yaw: 0.7, pitch: -0.2, zoom: 1, spin: true }
 let W = 1, H = 1, dpr = 1, cx = 0, cy = 0, S = 1, cyaw = 1, syaw = 0, cpit = 1, spit = 0
 const DIST = 3.4
 const out = { x: 0, y: 0, p: 1, z: 0 }
@@ -315,7 +315,8 @@ let last = performance.now(), T = 0
 function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000); last = now; T += dt
   const t = T, focus = pinned >= 0 ? pinned : hover, searching = lit.size > 0
-  if (cam.spin && !drag.on && hover < 0) cam.yaw += dt * 0.13
+  // หมุนช้า ๆ ตลอด · ชี้จุดความจำ = ชะลอให้อ่านทัน ไม่หยุด (จุดหนาแน่นจนเมาส์โดนจุดเกือบตลอด)
+  if (cam.spin && !drag.on) cam.yaw += dt * 0.12 * (hover >= 0 ? 0.3 : 1)
   cyaw = Math.cos(cam.yaw); syaw = Math.sin(cam.yaw); cpit = Math.cos(cam.pitch); spit = Math.sin(cam.pitch)
   cx = W / 2; cy = H * 0.45; S = Math.min(W, H) * 0.37 * cam.zoom
 
@@ -482,7 +483,6 @@ $('spin').addEventListener('click', () => {
   cam.spin = !cam.spin
   $('spin').textContent = t(cam.spin ? 'spinStop' : 'spinGo'); $('spin').setAttribute('aria-pressed', String(cam.spin))
 })
-if (calm) $('spin').setAttribute('aria-pressed', 'false')
 
 // ---------- ข้อมูล ----------
 const api = async (path, body) => {
@@ -580,7 +580,7 @@ $('lang').addEventListener('click', () => { lang = lang === 'th' ? 'en' : 'th'; 
 
 $('login').addEventListener('submit', async (ev) => {
   ev.preventDefault()
-  cfg.container = $('container').value.trim(); cfg.key = $('key').value.trim()
+  cfg.container = $('container').value.trim(); cfg.key = window.PANYA_USER ? '' : $('key').value.trim()
   $('err').textContent = ''
   try {
     await busy($('enter'), t('signingIn'), open)
@@ -588,8 +588,9 @@ $('login').addEventListener('submit', async (ev) => {
   } catch (e) { $('err').textContent = e.message }
 })
 
-$('logout').addEventListener('click', () => {
+$('logout').addEventListener('click', async () => {
   sessionStorage.removeItem('panya.container'); sessionStorage.removeItem('panya.key')
+  if (window.PANYA_USER) { await fetch('/auth/logout', { method: 'POST' }).catch(() => {}); location.href = '/login'; return }
   location.href = location.pathname
 })
 // ส่งออกทั้งสมองเป็นไฟล์ JSON ที่นำกลับเข้าได้ด้วย POST /v1/import
@@ -604,11 +605,27 @@ $('export').addEventListener('click', async () => {
   } catch (e) { $('stats').textContent = e.message }
 })
 
+// ล็อกอินด้วยชื่อผู้ใช้แล้ว (cookie): ไม่ต้องใช้ key · เลือกสมองจาก ?brain หรือสมองแรกที่ผู้ใช้เข้าได้
+const me = window.PANYA_USER
+if (me) {
+  $('key').hidden = true; $('key').required = false
+  $('logout').style.display = 'none' // ใช้ปุ่มออกจากระบบที่หัวหน้าแทน
+  if (!cfg.container) {
+    const own = me.brains.filter((b) => b !== '*')
+    cfg.container = me.role !== 'admin' && !me.brains.includes('*') && own.length ? own[0] : ''
+  }
+}
 $('container').value = cfg.container
 applyLang()
 window.addEventListener('resize', resize)
 resize(); requestAnimationFrame(frame)
-if (cfg.container && cfg.key) open().catch((e) => { $('err').textContent = e.message })
+if (me && !cfg.container) {
+  // เข้าได้ทุกสมอง: เปิดสมองที่ใหญ่ที่สุด
+  fetch('/v1/overview').then((r) => r.json()).then((o) => {
+    const top = (o.brains || []).slice().sort((a, b) => b.live - a.live)[0]
+    if (top) { cfg.container = top.brain; $('container').value = top.brain; return open() }
+  }).catch((e) => { $('err').textContent = e.message })
+} else if (cfg.container && (cfg.key || me)) open().catch((e) => { $('err').textContent = e.message })
 </script>
 </body>
 </html>

@@ -2,7 +2,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { localEmbedder } from '../src/embed'
 import { MemoryStore } from '../src/memory'
-import { createApp } from '../src/server'
+import { createApp, isLostConnection, isPrivateAddress } from '../src/server'
 
 const A = 'api_tenant_a'
 const B = 'api_tenant_b'
@@ -212,6 +212,70 @@ describe('แดชบอร์ด', () => {
 
     expect((await call('GET', '/v1/overview', null)).status).toBe(401)
     expect((await call('GET', '/v1/events', null)).status).toBe(401)
+  })
+
+  test('แดชบอร์ดสาธารณะ: ไม่มี key อ่านได้เฉพาะสถิติและเหตุการณ์ และเฉพาะเมื่อเปิดโหมดไว้', async () => {
+    // จำลอง IP ของการเชื่อมต่อแบบที่ Bun ส่งให้ Hono
+    const from = (address: string) => ({ requestIP: () => ({ address, family: address.includes(':') ? 'IPv6' : 'IPv4', port: 50000 }) })
+    const get = (a: ReturnType<typeof createApp>, path: string, address: string) => a.request(path, {}, from(address))
+    const lan = createApp(store, ['admin-key'], { publicDashboard: 'lan' })
+
+    const o = await get(lan, '/v1/overview', '192.168.1.50')
+    expect(o.status).toBe(200)
+    const body = (await o.json()) as any
+    expect(body.viewer).toBe(true)
+    expect(body.brains.some((b: any) => b.brain === A)).toBe(true)
+    expect(body.searches.brains).toBeDefined()
+    expect((await get(lan, '/v1/events', '127.0.0.1')).status).toBe(200)
+    expect((await get(lan, '/v1/events', '::ffff:10.0.0.7')).status).toBe(200)
+
+    // นอกเครือข่ายภายใน, endpoint อื่น, และการเขียน ยังต้องมี key
+    expect((await get(lan, '/v1/overview', '8.8.8.8')).status).toBe(401)
+    expect((await get(lan, '/v1/overview', '172.32.0.1')).status).toBe(401)
+    // แผนที่ความจำ: ผู้ชมได้ตำแหน่งและหมวด ไม่ได้ข้อความ · มี key ได้ข้อความครบ
+    const g = (await (await get(lan, `/v1/graph?brain=${A}`, '192.168.1.50')).json()) as any
+    expect(g.nodes.length).toBeGreaterThan(0)
+    expect(g.nodes[0].text).toBeUndefined()
+    expect(g.nodes[0].source).toBeUndefined()
+    expect(typeof g.nodes[0].group).toBe('string')
+    const full = (await (await lan.request(`/v1/graph?brain=${A}`, { headers: { authorization: 'Bearer admin-key' } }, from('8.8.8.8'))).json()) as any
+    expect(typeof full.nodes[0].text).toBe('string')
+    expect((await get(lan, `/v1/graph?brain=${A}`, '8.8.8.8')).status).toBe(401)
+    // ทุกความจำเป็นจุด: ผู้ชมเปิดได้ ได้ตำแหน่ง หมวด วันที่ ไม่มีข้อความ · อ่านข้อความทีละรายการต้องมี key
+    const pts = (await (await get(lan, `/v1/points?brain=${A}`, '192.168.1.50')).json()) as any
+    expect(pts.total).toBeGreaterThan(0)
+    expect(pts.ids).toHaveLength(pts.total)
+    expect(pts.x).toHaveLength(pts.total)
+    expect(pts.groups.length).toBeGreaterThan(0)
+    expect(JSON.stringify(pts)).not.toContain('D-11')
+    expect((await get(lan, `/v1/memories/${pts.ids[0]}?brain=${A}`, '192.168.1.50')).status).toBe(401)
+    const one = (await (await lan.request(`/v1/memories/${pts.ids[0]}?brain=${A}`, { headers: { authorization: 'Bearer admin-key' } }, from('8.8.8.8'))).json()) as any
+    expect(typeof one.memory.text).toBe('string')
+    expect((await lan.request(`/v1/memories/${pts.ids[0]}?brain=${B}`, { headers: { authorization: 'Bearer admin-key' } }, from('8.8.8.8'))).status).toBe(404)
+    expect((await get(lan, `/v1/export?brain=${A}`, '192.168.1.50')).status).toBe(401)
+    expect((await lan.request('/v1/memories', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ brain: A, text: 'x' }) }, from('192.168.1.50'))).status).toBe(401)
+    // ส่ง key ผิดมา = 401 แม้มาจากเครือข่ายภายใน
+    expect((await lan.request('/v1/overview', { headers: { authorization: 'Bearer wrong' } }, from('192.168.1.50'))).status).toBe(401)
+    // ไม่มีข้อมูล IP (เช่นรันนอก Bun) = ไม่อนุญาต
+    expect((await lan.request('/v1/overview')).status).toBe(401)
+
+    expect((await get(createApp(store, ['admin-key'], { publicDashboard: 'off' }), '/v1/overview', '127.0.0.1')).status).toBe(401)
+    expect((await get(createApp(store, ['admin-key'], { publicDashboard: 'all' }), '/v1/overview', '8.8.8.8')).status).toBe(200)
+    // มี key ก็ยังใช้ได้ตามปกติ และไม่ถูกนับเป็นผู้ชม
+    expect(((await (await lan.request('/v1/overview', { headers: { authorization: 'Bearer admin-key' } }, from('8.8.8.8'))).json()) as any).viewer).toBe(false)
+  })
+
+  test('isLostConnection แยก error ที่การเชื่อมต่อฐานข้อมูลตายออกจาก error อื่น', () => {
+    expect(isLostConnection(Object.assign(new Error("Can't add new command when connection is in closed state"), { fatal: true }))).toBe(true)
+    expect(isLostConnection({ message: 'read ECONNRESET' })).toBe(true)
+    expect(isLostConnection({ code: 'PROTOCOL_CONNECTION_LOST', message: '' })).toBe(true)
+    expect(isLostConnection(new Error('subject is required'))).toBe(false)
+    expect(isLostConnection(null)).toBe(false)
+  })
+
+  test('isPrivateAddress', () => {
+    for (const ip of ['127.0.0.1', '10.1.2.3', '172.16.0.1', '172.31.255.255', '192.168.0.9', '169.254.1.1', '::1', 'fd12:3456::1', 'fe80::1', '::ffff:192.168.1.2']) expect(isPrivateAddress(ip)).toBe(true)
+    for (const ip of ['8.8.8.8', '172.15.0.1', '172.32.0.1', '192.169.0.1', '2001:db8::1', '', undefined]) expect(isPrivateAddress(ip)).toBe(false)
   })
 
   test('ไฟล์เสียง: เสิร์ฟเฉพาะชื่อที่อนุญาตใน src/assets และตอบ Range เป็นช่วง', async () => {

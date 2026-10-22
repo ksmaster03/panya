@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>panya · ผู้ใช้</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #030814; --bg2: #0a1a38; --ink: #e8eef9; --ink2: #c3cfe6; --muted: #9db0d0;
+    --line: rgba(110, 170, 255, .22); --panel: rgba(8, 20, 44, .72); --field: rgba(6, 16, 36, .78); --cyan: #7fe3ff;
+    --good: #3ccf6e; --crit: #ff8a8a; --warn: #fab219; --tap: 44px;
+  }
+  * { box-sizing: border-box; }
+  html, body { min-height: 100%; margin: 0; }
+  body { background: radial-gradient(1100px 700px at 50% 0%, var(--bg2), var(--bg) 70%) fixed; background-color: var(--bg); color: var(--ink); font-family: "Leelawadee UI", "Noto Sans Thai", Sarabun, Tahoma, system-ui, sans-serif; line-height: 1.7; }
+  header { position: sticky; top: 0; z-index: 9; display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--line); background: rgba(5, 13, 30, .86); backdrop-filter: blur(10px); }
+  h1 { font-size: 18px; margin: 0; font-weight: 600; white-space: nowrap; }
+  h1 b { color: var(--cyan); font-weight: 600; }
+  h2 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
+  .grow { flex: 1 1 auto; }
+  .nav { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .nav a { display: inline-flex; align-items: center; min-height: var(--tap); padding: 0 14px; color: var(--ink2); text-decoration: none; font-size: 14px; }
+  .nav a:hover { background: rgba(40, 104, 190, .35); color: var(--ink); }
+  .nav a[aria-current="page"] { background: rgba(57, 135, 229, .45); color: var(--ink); font-weight: 600; }
+  input, select, button { font: inherit; color: var(--ink); background: var(--field); border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; min-height: var(--tap); min-width: 0; }
+  input:focus, select:focus, button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 1px; }
+  button { cursor: pointer; background: rgba(28, 74, 140, .55); white-space: nowrap; }
+  button:hover { background: rgba(40, 104, 190, .7); }
+  button.primary { background: linear-gradient(180deg, rgb(34, 104, 190), rgb(24, 78, 152)); border-color: rgba(127, 227, 255, .5); }
+  button.danger { border-color: rgba(255, 138, 138, .5); }
+  main { max-width: 1100px; margin: 0 auto; padding: 12px 16px 32px; display: grid; gap: 12px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; min-width: 0; }
+  form.add { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; align-items: end; }
+  form.add label { display: grid; gap: 2px; font-size: 13px; color: var(--muted); }
+  .table { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { color: var(--muted); font-weight: 500; font-size: 13px; }
+  td .row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .off { color: var(--crit); }
+  .on { color: var(--good); }
+  #msg { min-height: 1.7em; margin: 0; }
+  #msg.err { color: var(--crit); }
+  .secret { margin-top: 8px; padding: 10px 12px; border: 1px solid var(--warn); border-radius: 10px; background: rgba(250, 178, 25, .08); }
+  .secret code { font-size: 18px; user-select: all; color: var(--ink); }
+  .muted { color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1><b>panya</b> <span data-i18n="title"></span></h1>
+  <nav class="nav" data-i18n-aria="navAria">
+    <a href="/brain" data-i18n="navBrain"></a><a href="/dashboard" data-i18n="navDash"></a><a href="/warehouse" data-i18n="navWh"></a><a href="/users" aria-current="page" data-i18n="navUsers"></a>
+  </nav>
+  <i class="grow"></i>
+  <button id="lang" type="button"></button>
+</header>
+<main>
+  <section class="panel">
+    <h2 data-i18n="addTitle"></h2>
+    <form class="add" id="add">
+      <label><span data-i18n="user"></span><input id="nu" autocomplete="off" autocapitalize="none" spellcheck="false" required></label>
+      <label><span data-i18n="role"></span><select id="nr"><option value="member"></option><option value="viewer"></option><option value="admin"></option></select></label>
+      <label><span data-i18n="brains"></span><input id="nb" data-i18n-ph="brainsPh"></label>
+      <button class="primary" type="submit" data-i18n="add"></button>
+    </form>
+    <p class="muted" data-i18n="roleHelp"></p>
+    <div id="secret" class="secret" hidden></div>
+  </section>
+  <section class="panel">
+    <h2 data-i18n="listTitle"></h2>
+    <p id="msg" role="status"></p>
+    <div class="table"><table>
+      <thead><tr><th data-i18n="user"></th><th data-i18n="role"></th><th data-i18n="brains"></th><th data-i18n="status"></th><th data-i18n="lastLogin"></th><th></th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table></div>
+  </section>
+</main>
+<script>
+const L = {
+  th: {
+    title: '· ผู้ใช้', navAria: 'หน้าหลัก', navBrain: 'สมอง', navDash: 'แดชบอร์ด', navWh: 'คลังสินค้า', navUsers: 'ผู้ใช้', signOut: 'ออกจากระบบ', other: 'EN',
+    addTitle: 'เพิ่มผู้ใช้', listTitle: 'ผู้ใช้ทั้งหมด', user: 'ชื่อผู้ใช้', role: 'บทบาท', brains: 'สมองที่เข้าได้', brainsPh: 'คั่นด้วย , หรือ * = ทุกสมอง', add: 'เพิ่ม',
+    status: 'สถานะ', lastLogin: 'เข้าล่าสุด', never: 'ยังไม่เคย', active: 'ใช้งาน', disabled: 'ระงับ',
+    admin: 'admin · จัดการทุกอย่าง', member: 'member · อ่านและเขียน', viewer: 'viewer · ดูและค้นเท่านั้น',
+    roleHelp: 'admin เข้าได้ทุกสมองและจัดการผู้ใช้ · member อ่าน เขียน และลบได้เฉพาะสมองที่กำหนด · viewer ดูและค้นได้อย่างเดียว · ระบบสุ่มรหัสผ่านให้และแสดงครั้งเดียว',
+    reset: 'รีเซ็ตรหัส', disable: 'ระงับ', enable: 'เปิดใช้', remove: 'ลบ', save: 'บันทึกสมอง',
+    newPass: (u) => `รหัสผ่านของ ${u} (แสดงครั้งเดียว ส่งให้เจ้าของทางช่องทางที่ปลอดภัย):`,
+    confirmRemove: (u) => `ลบผู้ใช้ ${u}? กู้คืนไม่ได้`, confirmReset: (u) => `สุ่มรหัสใหม่ให้ ${u}? ผู้ใช้นั้นจะถูกออกจากระบบทุกเครื่อง`,
+    saved: 'บันทึกแล้ว', notAdmin: 'หน้านี้สำหรับ admin เท่านั้น', you: (u, r) => `${u} · ${r}`,
+  },
+  en: {
+    title: '· Users', navAria: 'Main pages', navBrain: 'Brain', navDash: 'Dashboard', navWh: 'Warehouse', navUsers: 'Users', signOut: 'Sign out', other: 'ไทย',
+    addTitle: 'Add a user', listTitle: 'All users', user: 'Username', role: 'Role', brains: 'Brains', brainsPh: 'comma separated, * = all brains', add: 'Add',
+    status: 'Status', lastLogin: 'Last sign-in', never: 'never', active: 'active', disabled: 'disabled',
+    admin: 'admin · manages everything', member: 'member · read and write', viewer: 'viewer · view and search only',
+    roleHelp: 'admin can use every brain and manage users · member reads, writes and deletes in the listed brains · viewer can only view and search · a random password is generated and shown once',
+    reset: 'Reset password', disable: 'Disable', enable: 'Enable', remove: 'Delete', save: 'Save brains',
+    newPass: (u) => `Password for ${u} (shown once, send it to the owner over a safe channel):`,
+    confirmRemove: (u) => `Delete user ${u}? This cannot be undone.`, confirmReset: (u) => `Generate a new password for ${u}? They will be signed out everywhere.`,
+    saved: 'Saved', notAdmin: 'This page is for admins only', you: (u, r) => `${u} · ${r}`,
+  },
+}
+let lang = (() => { try { return localStorage.getItem('panya.lang') } catch { return null } })() || ((navigator.language || 'th').toLowerCase().startsWith('th') ? 'th' : 'en')
+const $ = (id) => document.getElementById(id)
+const t = (k, ...a) => { const v = L[lang][k]; return typeof v === 'function' ? v(...a) : v }
+const esc = (s) => String(s).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch])
+const me = window.PANYA_USER || null
+let list = []
+
+const api = async (method, path, body) => {
+  const r = await fetch(path, { method, headers: body ? { 'content-type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined })
+  if (r.status === 401) { location.href = '/login?next=/users'; throw new Error('401') }
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(j.error || String(r.status))
+  return j
+}
+const say = (text, err = false) => { $('msg').textContent = text; $('msg').className = err ? 'err' : '' }
+const showSecret = (user, password) => {
+  $('secret').hidden = false
+  $('secret').innerHTML = `${esc(t('newPass', user))}<br><code>${esc(password)}</code>`
+}
+const parseBrains = (s) => s.split(',').map((x) => x.trim()).filter(Boolean)
+
+function render() {
+  $('rows').innerHTML = list.map((u) => `
+    <tr data-u="${esc(u.username)}">
+      <td>${esc(u.username)}${me && me.username === u.username ? ' ★' : ''}</td>
+      <td><select data-act="role">${['admin', 'member', 'viewer'].map((r) => `<option value="${r}"${r === u.role ? ' selected' : ''}>${r}</option>`).join('')}</select></td>
+      <td><div class="row"><input data-act="brains" value="${esc(u.role === 'admin' ? '*' : u.brains.join(', '))}"${u.role === 'admin' ? ' disabled' : ''} size="18">${u.role === 'admin' ? '' : `<button data-act="save">${esc(t('save'))}</button>`}</div></td>
+      <td class="${u.disabled ? 'off' : 'on'}">${esc(t(u.disabled ? 'disabled' : 'active'))}</td>
+      <td>${u.lastLoginAt ? esc(new Date(u.lastLoginAt).toLocaleString(lang === 'th' ? 'th-TH' : 'en-GB')) : esc(t('never'))}</td>
+      <td><div class="row">
+        <button data-act="reset">${esc(t('reset'))}</button>
+        <button data-act="toggle">${esc(t(u.disabled ? 'enable' : 'disable'))}</button>
+        <button data-act="remove" class="danger">${esc(t('remove'))}</button>
+      </div></td>
+    </tr>`).join('')
+}
+
+async function load() {
+  try { list = (await api('GET', '/v1/users')).users; render() } catch (e) { say(e.message === 'admin only' ? t('notAdmin') : e.message, true) }
+}
+
+$('rows').addEventListener('click', async (ev) => {
+  const btn = ev.target.closest('button'); if (!btn) return
+  const tr = btn.closest('tr'), name = tr.dataset.u, u = list.find((x) => x.username === name)
+  try {
+    if (btn.dataset.act === 'save') await api('PATCH', `/v1/users/${encodeURIComponent(name)}`, { brains: parseBrains(tr.querySelector('[data-act=brains]').value) })
+    else if (btn.dataset.act === 'toggle') await api('PATCH', `/v1/users/${encodeURIComponent(name)}`, { disabled: !u.disabled })
+    else if (btn.dataset.act === 'reset') {
+      if (!confirm(t('confirmReset', name))) return
+      showSecret(name, (await api('PATCH', `/v1/users/${encodeURIComponent(name)}`, { resetPassword: true })).password)
+    } else if (btn.dataset.act === 'remove') {
+      if (!confirm(t('confirmRemove', name))) return
+      await api('DELETE', `/v1/users/${encodeURIComponent(name)}`)
+    }
+    say(t('saved')); await load()
+  } catch (e) { say(e.message, true) }
+})
+$('rows').addEventListener('change', async (ev) => {
+  if (ev.target.dataset.act !== 'role') return
+  const name = ev.target.closest('tr').dataset.u
+  try { await api('PATCH', `/v1/users/${encodeURIComponent(name)}`, { role: ev.target.value }); say(t('saved')) } catch (e) { say(e.message, true) }
+  await load()
+})
+$('add').addEventListener('submit', async (ev) => {
+  ev.preventDefault()
+  const username = $('nu').value.trim().toLowerCase(), role = $('nr').value
+  try {
+    const r = await api('POST', '/v1/users', { username, role, brains: role === 'admin' ? ['*'] : parseBrains($('nb').value) })
+    showSecret(r.user.username, r.password); $('nu').value = ''; $('nb').value = ''
+    say(t('saved')); await load()
+  } catch (e) { say(e.message, true) }
+})
+
+function applyLang() {
+  document.documentElement.lang = lang; document.title = 'panya ' + t('title')
+  for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.dataset.i18n)
+  for (const el of document.querySelectorAll('[data-i18n-ph]')) el.placeholder = t(el.dataset.i18nPh)
+  for (const el of document.querySelectorAll('[data-i18n-aria]')) el.setAttribute('aria-label', t(el.dataset.i18nAria))
+  for (const o of $('nr').options) o.textContent = t(o.value)
+  $('lang').textContent = t('other')
+  render()
+}
+$('lang').addEventListener('click', () => { lang = lang === 'th' ? 'en' : 'th'; try { localStorage.setItem('panya.lang', lang) } catch {}; applyLang() })
+applyLang(); load()
+</script>
+</body>
+</html>
