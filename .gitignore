@@ -13,3 +13,7 @@ build/
 
 # �ŧ��Сͺ: �ѧ����׹�ѹ�Է��������� repo �Ҹ�ó�
 *.mp3
+
+# สถานะและไฟล์ย้ายข้อมูลของ aws-deploy (มีเลขบัญชีและข้อมูลจริง)
+aws-deploy/outputs.json
+aws-deploy/.migrate/

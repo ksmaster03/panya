@@ -1,0 +1,69 @@
+# panya บน EC2: Caddy (รับจาก Cloudflare) → panya → seekdb
+# seekdb ไม่ออกนอกเครื่องและออกอินเทอร์เน็ตไม่ได้ (root ไม่มีรหัสผ่าน image ไม่รองรับการตั้ง)
+# panya เปิดที่ 127.0.0.1:6800 เฉพาะในเครื่อง ให้สคริปต์นำเข้าและสำรองข้อมูลเรียกได้
+name: panya
+
+x-logs: &logs
+  driver: awslogs
+  options:
+    awslogs-region: ${AWS_REGION}
+    awslogs-group: /panya/prod
+    awslogs-stream: "{{.Name}}"
+
+services:
+  seekdb:
+    image: oceanbase/seekdb@sha256:4db4961869d554313520d6081fca29265ba6da6db7313311bd8acbed771a956b
+    restart: unless-stopped
+    environment:
+      CPU_COUNT: 2
+      DATAFILE_SIZE: 2G
+      DATAFILE_NEXT: 1G
+      LOG_DISK_SIZE: 2G
+    volumes:
+      - seekdb-data:/var/lib/seekdb
+    mem_limit: 1600m
+    networks: [internal]
+    logging: *logs
+
+  panya:
+    image: ${PANYA_IMAGE}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      SEEKDB_HOST: seekdb
+      SEEKDB_READ_POOL: 2
+      PANYA_HOST: 0.0.0.0
+      PANYA_TRUST_PROXY: "1"
+      PANYA_COOKIE_SECURE: "1"
+      PANYA_PUBLIC_DASHBOARD: "off"
+    depends_on: [seekdb]
+    ports:
+      - "127.0.0.1:6800:6800"
+    mem_limit: 1600m
+    networks: [internal, web]
+    logging: *logs
+
+  caddy:
+    image: caddy:2.8.4
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    mem_limit: 160m
+    depends_on: [panya]
+    networks: [web]
+    logging: *logs
+
+networks:
+  internal:
+    internal: true
+  web: {}
+
+volumes:
+  seekdb-data: {}
+  caddy-data: {}

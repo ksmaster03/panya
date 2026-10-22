@@ -1,0 +1,2 @@
+aws-deploy/** text eol=lf
+*.sh text eol=lf
