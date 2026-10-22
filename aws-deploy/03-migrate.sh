@@ -9,7 +9,7 @@ BUCKET="$(out_get bucket)"; IID="$(out_get instance_id)"
 STAMP="$(date -u +%Y%m%d-%H%M%S)"
 DIR="$HERE/.migrate/$STAMP"
 
-(cd "$REPO_ROOT" && bun aws-deploy/export-local.ts "$DIR")
+(cd "$REPO_ROOT" && bun aws-deploy/export-local.ts "$(winpath "$DIR")")
 t s3 cp --recursive --only-show-errors "$(winpath "$DIR")" "s3://$BUCKET/migrate/$STAMP/"
 ok "exports uploaded to s3://$BUCKET/migrate/$STAMP/"
 [ "$DRY_RUN" = 1 ] && exit 0

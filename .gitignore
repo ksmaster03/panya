@@ -17,3 +17,4 @@ build/
 # สถานะและไฟล์ย้ายข้อมูลของ aws-deploy (มีเลขบัญชีและข้อมูลจริง)
 aws-deploy/outputs.json
 aws-deploy/.migrate/
+__pycache__/
