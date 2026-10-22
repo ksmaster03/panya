@@ -2,7 +2,9 @@
 # :443 ใบรับรองที่ Caddy ออกเอง ใช้กับโหมด SSL "Full" ของ Cloudflare · :80 ใช้กับโหมด "Flexible"
 # ถ้าโซนเป็น "Full (strict)" ต้องใช้ Origin Certificate ของ Cloudflare แทน tls internal
 {
-	auto_https off
+	# ไม่เด้ง http → https (Cloudflare โหมด Flexible เรียกเข้าทาง :80) แต่ยังออกใบรับรอง tls internal ให้ :443
+	# (auto_https off จะปิดการออกใบรับรองไปด้วย ทำให้ :443 ตอบ TLS internal error)
+	auto_https disable_redirects
 	admin off
 }
 

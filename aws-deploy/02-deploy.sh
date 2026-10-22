@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # build image arm64 จาก clone ที่สะอาด → ECR (tag = git sha, ห้ามทับ) → สั่งเครื่องดึงและรันผ่าน SSM
-#   DEPLOY_DIR (ค่าเริ่มต้น /d/tmp/panya-deploy) ต้องเป็น clone ที่ไม่มีไฟล์แก้ค้าง
+#   DEPLOY_DIR (ค่าเริ่มต้น D:/tmp/panya-deploy) ต้องเป็น clone ที่ไม่มีไฟล์แก้ค้าง
 set -euo pipefail
 source "$(dirname "$0")/00-vars.sh" "$@"
 t() { aws_ "$@" | tr -d '\r'; }
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
-DEPLOY_DIR="${DEPLOY_DIR:-/d/tmp/panya-deploy}"
+# รูปแบบ D:/... เพราะ MSYS_NO_PATHCONV=1 ทำให้ git.exe ไม่แปลง /d/... ให้
+DEPLOY_DIR="${DEPLOY_DIR:-D:/tmp/panya-deploy}"
 [ -z "$(git -C "$DEPLOY_DIR" status --porcelain)" ] || { echo "$DEPLOY_DIR has uncommitted changes"; exit 1; }
 SHA="$(git -C "$DEPLOY_DIR" rev-parse --short=7 HEAD)"
 REPO="$(out_get ecr_repo)"; BUCKET="$(out_get bucket)"; IID="$(out_get instance_id)"
@@ -22,9 +23,11 @@ else
     (cd "$DEPLOY_DIR" && docker buildx build --platform linux/arm64 --provenance=false -t "panya:$SHA-arm64" --load .)
   fi
   if [ "$DRY_RUN" = 1 ]; then echo "  [dry-run] docker push $IMAGE"; else
-    aws ecr get-login-password | docker login --username AWS --password-stdin "${REPO%%/*}" >/dev/null
+    # token ของ ECR ยาวเกินที่ Windows Credential Manager รับ ("The stub received bad data")
+    # จึง login และ push จาก container docker:cli ที่ใช้ Docker engine เดียวกัน (token อยู่แค่ใน container ที่ลบทิ้งทันที)
     docker tag "panya:$SHA-arm64" "$IMAGE"
-    docker push -q "$IMAGE"
+    aws ecr get-login-password | tr -d '\r\n' | docker run --rm -i -v /var/run/docker.sock:/var/run/docker.sock docker:27-cli \
+      sh -c "docker login --username AWS --password-stdin ${REPO%%/*} >/dev/null && docker push -q $IMAGE"
   fi
   ok "image pushed $IMAGE"
 fi
@@ -47,6 +50,7 @@ bash render-env.sh {image} {domain} {region}
 aws ecr get-login-password --region {region} | docker login --username AWS --password-stdin {registry} >/dev/null
 docker compose pull -q
 docker compose up -d --remove-orphans
+docker compose restart caddy >/dev/null  # Caddyfile เป็นไฟล์ mount: compose ไม่รู้ว่าเปลี่ยน และ admin API ปิดอยู่จึง reload ไม่ได้
 for i in $(seq 1 90); do curl -fsS http://127.0.0.1:6800/health >/dev/null 2>&1 && break; sleep 5; done
 curl -fsS http://127.0.0.1:6800/health
 echo
