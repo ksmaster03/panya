@@ -4,9 +4,15 @@ import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { config } from './config'
 import type { Memory, MemoryStore, RememberInput } from './memory'
 import { MIN_PASSWORD, ROLES, USERNAME, randomPassword, type Role, type User } from './users'
+import { findSecret } from './secrets'
+
+/** ข้อความเมื่อพบความลับ ผู้เรียก (คนหรือโปรแกรม) ต้องเอาความลับออกแล้วส่งใหม่ */
+export const SECRET_REFUSED = 'refused: looks like a password, key or token. panya never stores secrets; remove it and send again'
 
 // scope = brain ที่เข้าได้ (null = ทุก brain) · user = ผู้ใช้ที่ล็อกอินด้วยรหัสผ่าน (ไม่มีเมื่อใช้ API key)
-type Env = { Variables: { scope: Set<string> | null; viewer?: boolean; user?: User } }
+// wscope = brain ที่เขียน/ลบได้ (null = ทุก brain) แยกจาก scope ที่อ่านได้ เพราะสมองที่ได้รับแชร์อ่านได้อย่างเดียว
+// viaKey = ผู้ใช้เรียกด้วย API key ของตัวเอง (ไม่ใช่ cookie) · จัดการ key และรหัสผ่านได้เฉพาะทาง cookie
+type Env = { Variables: { scope: Set<string> | null; wscope: Set<string> | null; viewer?: boolean; user?: User; viaKey?: boolean } }
 
 /** ชื่อ cookie ของ session ผู้ใช้ */
 export const SESSION_COOKIE = 'panya_session'
@@ -298,25 +304,40 @@ export function createApp(
     if (keys.has(token)) {
       const bound = keys.get(token)
       c.set('scope', bound ? new Set([bound]) : null)
+      c.set('wscope', bound ? new Set([bound]) : null)
       return next()
     }
-    // ผู้ใช้ที่ล็อกอินแล้ว: หน้าเว็บส่ง cookie มาเอง ไม่มี Authorization
+    // ผู้ใช้: ล็อกอินด้วย cookie (หน้าเว็บ) หรือ API key ของผู้ใช้เอง (pnu_...) · สิทธิ์เท่ากันทั้งสองทาง
+    const asUser = async (u: User) => {
+      // viewer อ่านและค้นได้ แต่เขียน นำเข้า หรือลบไม่ได้
+      if (u.role === 'viewer' && c.req.method !== 'GET' && c.req.path !== '/v1/search') return c.json({ error: 'read-only user' }, 403)
+      // อ่านได้: สมองของตัวเอง + ที่เจ้าของแชร์ให้ + ที่ admin อนุญาต · เขียนได้: เฉพาะสมองของตัวเอง
+      if (u.role === 'admin') { c.set('scope', null); c.set('wscope', null) }
+      else {
+        const { own, shared } = await store.brains.accessFor(u.username)
+        c.set('scope', u.brains.includes('*') ? null : new Set([...own, ...shared, ...u.brains]))
+        c.set('wscope', new Set(u.role === 'member' ? own : []))
+      }
+      c.set('user', u)
+      return next()
+    }
+    if (token.startsWith('pnu_')) {
+      const u = await users.userForKey(token)
+      if (u) { c.set('viaKey', true); return asUser(u) }
+      return c.json({ error: 'unauthorized' }, 401)
+    }
     if (!token) {
       const s = await sessionOf(c)
       if (s) {
-        const u = s.user
         if (c.req.method !== 'GET' && !sameOrigin(c)) return c.json({ error: 'cross-site request' }, 403)
-        // viewer อ่านและค้นได้ แต่เขียน นำเข้า หรือลบไม่ได้
-        if (u.role === 'viewer' && c.req.method !== 'GET' && c.req.path !== '/v1/search') return c.json({ error: 'read-only user' }, 403)
-        c.set('scope', u.role === 'admin' || u.brains.includes('*') ? null : new Set(u.brains))
-        c.set('user', u)
-        return next()
+        return asUser(s.user)
       }
     }
     // แดชบอร์ดสาธารณะ: ไม่มี key ก็อ่านสถิติและเหตุการณ์ได้ เฉพาะสอง endpoint นี้ และเฉพาะ GET
     // ส่ง key มาแต่ผิด = ปฏิเสธเสมอ ไม่ปล่อยผ่านเป็นผู้ชม เพื่อให้ผู้เรียกรู้ว่า key ใช้ไม่ได้
     if (!token && c.req.method === 'GET' && PUBLIC_READ.has(c.req.path) && publicAllowed(c)) {
       c.set('scope', null)
+      c.set('wscope', new Set())
       c.set('viewer', true)
       return next()
     }
@@ -340,6 +361,11 @@ export function createApp(
     if (b.kind !== undefined && !KINDS.has(b.kind)) return 'invalid kind'
     for (const f of ['subject', 'attribute', 'source', 'ref']) {
       if (b[f] !== undefined && (typeof b[f] !== 'string' || b[f].length > 191)) return `invalid ${f}`
+    }
+    // กฎสำคัญ: ห้ามเก็บความลับ (ดู src/secrets.ts)
+    for (const f of ['text', 'subject', 'attribute', 'source', 'ref']) {
+      const hit = typeof b[f] === 'string' ? findSecret(b[f]) : null
+      if (hit) return `${SECRET_REFUSED} (${hit.rule} in ${f})`
     }
     let validUntil: number | undefined
     if (b.validUntil !== undefined && b.validUntil !== 0) {
@@ -368,7 +394,7 @@ export function createApp(
 
   app.post('/v1/memories', async (c) => {
     const b = await c.req.json().catch(() => null)
-    const brain = brainOf(c.get('scope'), b?.brain, b?.container)
+    const brain = brainOf(c.get('wscope'), b?.brain, b?.container)
     if (!brain) return c.json(denied, 403)
     const input = parseMemory(brain, b)
     if (typeof input === 'string') return c.json({ error: input }, 400)
@@ -381,7 +407,7 @@ export function createApp(
   // บันทึกหลายรายการในคำขอเดียว: { brain, memories: [{ text, ... }] } เร็วกว่ายิงทีละรายการ
   app.post('/v1/memories/batch', async (c) => {
     const b = await c.req.json().catch(() => null)
-    const brain = brainOf(c.get('scope'), b?.brain, b?.container)
+    const brain = brainOf(c.get('wscope'), b?.brain, b?.container)
     if (!brain) return c.json(denied, 403)
     const inputs = parseMany(brain, b.memories, 200)
     if (typeof inputs === 'string') return c.json({ error: inputs }, 400)
@@ -558,7 +584,7 @@ export function createApp(
   // ตรวจทุกรายการก่อน ถ้ามีรายการผิดรูปแบบจะไม่บันทึกอะไรเลย · replace = ล้าง brain ก่อนนำเข้า
   app.post('/v1/import', async (c) => {
     const b = await c.req.json().catch(() => null)
-    const brain = brainOf(c.get('scope'), b?.brain)
+    const brain = brainOf(c.get('wscope'), b?.brain)
     if (!brain) return c.json(denied, 403)
     // รุ่นที่ถูกแทนแล้วไม่นำเข้า: ถ้านำเข้าจะกลับมาเป็นค่าปัจจุบันและทับค่าที่ถูกต้อง
     const live = Array.isArray(b.memories) ? b.memories.filter((m: any) => m?.active !== false) : b.memories
@@ -585,7 +611,7 @@ export function createApp(
   // { brain, type, cues: ["ลูกค้า"], names: ["ไทยฟู้ดส์"] }
   app.put('/v1/entities', async (c) => {
     const b = await c.req.json().catch(() => null)
-    const brain = brainOf(c.get('scope'), b?.brain, b?.container)
+    const brain = brainOf(c.get('wscope'), b?.brain, b?.container)
     if (!brain) return c.json(denied, 403)
     if (!validEntity(b)) return c.json({ error: 'invalid type, cues or names' }, 400)
     await store.entities.register(brain, b.type, b.cues ?? [], b.names ?? [])
@@ -600,7 +626,7 @@ export function createApp(
 
   // ── ลบ ───────────────────────────────────────────────────────────
   app.delete('/v1/memories/:id', async (c) => {
-    const brain = brainOf(c.get('scope'), c.req.query('brain'), c.req.query('container'))
+    const brain = brainOf(c.get('wscope'), c.req.query('brain'), c.req.query('container'))
     if (!brain) return c.json(denied, 403)
     const ok = await store.forget(brain, c.req.param('id'))
     changed()
@@ -610,7 +636,7 @@ export function createApp(
 
   // ลบทุกความจำที่มาจากแหล่งเดียวกัน ใช้ตอนแทนที่หรือถอนไฟล์ต้นทาง
   app.delete('/v1/sources', async (c) => {
-    const brain = brainOf(c.get('scope'), c.req.query('brain'))
+    const brain = brainOf(c.get('wscope'), c.req.query('brain'))
     if (!brain) return c.json(denied, 403)
     const source = c.req.query('source')
     if (!source) return c.json({ error: 'source is required' }, 400)
@@ -622,13 +648,129 @@ export function createApp(
 
   // ล้างทั้ง brain กู้คืนไม่ได้ ต้องส่ง confirm=ชื่อ brain ซ้ำเพื่อกันยิงผิด
   app.delete('/v1/brain', async (c) => {
-    const brain = brainOf(c.get('scope'), c.req.query('brain'))
+    const brain = brainOf(c.get('wscope'), c.req.query('brain'))
     if (!brain) return c.json(denied, 403)
     if (c.req.query('confirm') !== brain) return c.json({ error: 'confirm must equal the brain name' }, 400)
     await store.clear(brain)
     changed()
     emit({ type: 'del', brain, n: 0, text: '', what: 'brain' })
     return c.json({ ok: true })
+  })
+
+  // ── สมองของผู้ใช้ ───────────────────────────────────────────────
+  // member สร้างสมองของตัวเองได้ เป็นเจ้าของ เขียน/ลบ/แชร์ได้ · คนที่ได้รับแชร์อ่านได้อย่างเดียว
+  // สมองที่ไม่มีในทะเบียน (เดิม หรือสร้างด้วย API key) เป็นของ admin
+  const ADMIN_OWNED = '(admin)'
+  const canManage = (c: Context<Env>, owner: string) => {
+    const u = c.get('user')
+    return u ? u.role === 'admin' || u.username === owner : c.get('scope') === null && !c.get('viewer')
+  }
+
+  // สมองที่ผู้เรียกเห็นได้ พร้อมเจ้าของ สิทธิ์ของตัวเอง และขนาด
+  app.get('/v1/brains', async (c) => {
+    const scope = c.get('scope'), wscope = c.get('wscope'), u = c.get('user')
+    const reg = await store.brains.list()
+    const sizes = new Map((await loadOverview()).brains.map((b) => [b.brain, b.live]))
+    const names = new Set([...sizes.keys(), ...reg.keys()])
+    const brains = [...names].filter((n) => scope === null || scope.has(n)).sort().map((name) => {
+      const info = reg.get(name)
+      const owner = info?.owner ?? ADMIN_OWNED
+      return {
+        name, owner, description: info?.description ?? '', createdAt: info?.createdAt ?? 0, memories: sizes.get(name) ?? 0,
+        access: wscope === null || wscope.has(name) ? 'owner' : 'read',
+        // รายชื่อผู้อ่านแสดงเฉพาะคนที่จัดการสมองนั้นได้
+        readers: canManage(c, owner) ? info?.readers ?? [] : undefined,
+      }
+    })
+    return c.json({ me: u ? { username: u.username, role: u.role } : undefined, canCreate: !u || u.role !== 'viewer', brains })
+  })
+
+  // { name, description? } · ชื่อซ้ำกับสมองที่มีอยู่ (ทั้งในทะเบียนและในฐานข้อมูล) ไม่ได้
+  app.post('/v1/brains', async (c) => {
+    const u = c.get('user')
+    if (u?.role === 'viewer' || c.get('viewer') || (!u && c.get('scope') !== null)) return c.json({ error: 'not allowed to create brains' }, 403)
+    const b = await c.req.json().catch(() => null)
+    const name = typeof b?.name === 'string' ? b.name.trim() : ''
+    if (!BRAIN_NAME.test(name)) return c.json({ error: 'name must be 1-128 characters: letters, digits, . _ : -' }, 400)
+    const description = typeof b?.description === 'string' ? b.description.trim().slice(0, 500) : ''
+    if (findSecret(description)) return c.json({ error: SECRET_REFUSED }, 400)
+    const exists = (await store.brains.get(name)) || (await loadOverview()).brains.some((x) => x.brain === name)
+    if (exists) return c.json({ error: 'a brain with this name already exists' }, 409)
+    // member มีได้ไม่เกิน 20 สมอง กันการสร้างทิ้งไว้เต็มฐานข้อมูล
+    if (u && u.role !== 'admin' && (await store.brains.accessFor(u.username)).own.length >= 20) return c.json({ error: 'brain limit reached (20 per user)' }, 409)
+    await store.brains.create(name, u?.username ?? ADMIN_OWNED, description)
+    return c.json({ name, owner: u?.username ?? ADMIN_OWNED, description }, 201)
+  })
+
+  // { description?, readers?: [username] } · เฉพาะเจ้าของหรือ admin
+  app.patch('/v1/brains/:name', async (c) => {
+    const name = c.req.param('name')
+    const info = await store.brains.get(name)
+    if (!canManage(c, info?.owner ?? ADMIN_OWNED)) return c.json({ error: 'only the owner can change this brain' }, 403)
+    const b = await c.req.json().catch(() => null)
+    if (!b || typeof b !== 'object') return c.json({ error: 'body must be a JSON object' }, 400)
+    const patch: { description?: string; readers?: string[] } = {}
+    if (b.description !== undefined) {
+      if (typeof b.description !== 'string' || findSecret(b.description)) return c.json({ error: 'invalid description' }, 400)
+      patch.description = b.description.trim().slice(0, 500)
+    }
+    if (b.readers !== undefined) {
+      if (!Array.isArray(b.readers) || b.readers.length > 200 || !b.readers.every((x: unknown) => typeof x === 'string' && USERNAME.test(x))) return c.json({ error: 'readers must be a list of usernames' }, 400)
+      const known = new Set((await users.list()).map((x) => x.username))
+      const unknown = b.readers.filter((x: string) => !known.has(x))
+      if (unknown.length) return c.json({ error: `unknown users: ${unknown.join(', ')}` }, 400)
+      patch.readers = b.readers.filter((x: string) => x !== info?.owner)
+    }
+    // สมองเดิมที่ยังไม่อยู่ในทะเบียน: ลงทะเบียนเป็นของ admin ก่อนแก้
+    if (!info) await store.brains.create(name, ADMIN_OWNED, '')
+    await store.brains.update(name, patch)
+    return c.json({ brain: await store.brains.get(name) })
+  })
+
+  // ลบทั้งสมอง (ความจำ + ทะเบียน) กู้คืนไม่ได้ · ต้องส่ง confirm=ชื่อสมอง · เฉพาะเจ้าของหรือ admin
+  app.delete('/v1/brains/:name', async (c) => {
+    const name = c.req.param('name')
+    if (!BRAIN_NAME.test(name)) return c.json({ error: 'invalid name' }, 400)
+    const info = await store.brains.get(name)
+    if (!canManage(c, info?.owner ?? ADMIN_OWNED)) return c.json({ error: 'only the owner can delete this brain' }, 403)
+    if (c.req.query('confirm') !== name) return c.json({ error: 'confirm must equal the brain name' }, 400)
+    await store.clear(name)
+    await store.brains.remove(name)
+    changed()
+    emit({ type: 'del', brain: name, n: 0, text: '', what: 'brain' })
+    return c.json({ ok: true })
+  })
+
+  // ── API key ของผู้ใช้ ─────────────────────────────────────────────
+  // สร้าง/ยกเลิกได้เฉพาะตอนล็อกอินผ่านหน้าเว็บ (cookie) ไม่ให้ key หนึ่งสร้าง key อื่นต่อได้เอง
+  const webUser = (c: Context<Env>) => (c.get('viaKey') ? undefined : c.get('user'))
+  app.get('/v1/keys', async (c) => {
+    const u = webUser(c)
+    if (!u) return c.json({ error: 'sign in on the web page to manage API keys' }, 403)
+    return c.json({ keys: await users.listKeys(u.username) })
+  })
+  // { name } → { key } แสดง key เต็มครั้งเดียว
+  app.post('/v1/keys', async (c) => {
+    const u = webUser(c)
+    if (!u) return c.json({ error: 'sign in on the web page to manage API keys' }, 403)
+    const b = await c.req.json().catch(() => null)
+    const name = typeof b?.name === 'string' ? b.name.trim() : ''
+    if (!name || name.length > 64) return c.json({ error: 'name is required (max 64), e.g. "laptop" or "claude-code"' }, 400)
+    if ((await users.listKeys(u.username)).length >= 10) return c.json({ error: 'key limit reached (10 per user); revoke one first' }, 409)
+    const { key, info } = await users.createKey(u.username, name)
+    console.log(`[panya] api key ${info.id} created by ${u.username}`)
+    return c.json({ key, ...info }, 201)
+  })
+  app.delete('/v1/keys/:id', async (c) => {
+    const u = webUser(c)
+    if (!u) return c.json({ error: 'sign in on the web page to manage API keys' }, 403)
+    return (await users.revokeKey(u.username, c.req.param('id'))) ? c.json({ ok: true }) : c.json({ error: 'not found' }, 404)
+  })
+
+  // รายชื่อผู้ใช้ (ชื่ออย่างเดียว) ให้เจ้าของสมองเลือกคนที่จะแชร์
+  app.get('/v1/usernames', async (c) => {
+    if (!c.get('user') && c.get('scope') !== null) return c.json({ error: 'not allowed' }, 403)
+    return c.json({ usernames: (await users.list()).filter((x) => !x.disabled).map((x) => x.username) })
   })
 
   // ── จัดการผู้ใช้ ─────────────────────────────────────────────────
@@ -696,6 +838,7 @@ export function createApp(
     if (!target) return c.json({ error: 'not found' }, 404)
     if (target.role === 'admin' && (await lastAdmin(name))) return c.json({ error: 'cannot delete the last admin' }, 409)
     await users.remove(name)
+    await store.brains.forgetUser(name)
     return c.json({ ok: true })
   })
 

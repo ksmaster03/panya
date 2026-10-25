@@ -4,6 +4,7 @@ import type { Embedder } from './embed'
 import type { Reranker } from './rerank'
 import { EntityRegistry, norm } from './entities'
 import { UserRegistry } from './users'
+import { BrainRegistry } from './brains'
 import { coverage, extractCodes, tokenize } from './tokenize'
 
 export type Kind = 'fact' | 'preference' | 'event'
@@ -137,6 +138,7 @@ export class MemoryStore {
     private readers: { client: SeekdbClient; col: Collection }[],
     private reranker: Reranker | null,
     readonly users: UserRegistry,
+    readonly brains: BrainRegistry,
   ) {}
 
   private next = 0
@@ -185,7 +187,7 @@ export class MemoryStore {
       const rc = new SeekdbClient({ host: c.host, port: c.port, user: c.user, password: c.password, database: c.database })
       readers.push({ client: rc, col: await rc.getCollection({ name: c.collection, embeddingFunction: null }) })
     }
-    return new MemoryStore(client, col, embedder, await EntityRegistry.open(client), readers, opts.reranker ?? null, await UserRegistry.open(client))
+    return new MemoryStore(client, col, embedder, await EntityRegistry.open(client), readers, opts.reranker ?? null, await UserRegistry.open(client), await BrainRegistry.open(client))
   }
 
   async close() {

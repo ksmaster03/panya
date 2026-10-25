@@ -27,5 +27,6 @@ await warmup()
 if (config.rerank.enabled) await warmupReranker()
 const app = createApp(store, undefined, { warmPoints: true, exitOnLostDb: true })
 
-Bun.serve({ port: config.port, hostname: process.env.PANYA_HOST ?? '127.0.0.1', fetch: app.fetch })
+// idleTimeout: Bun's 10 s default cuts off /v1/export of large brains (claude-skills ~36k memories)
+Bun.serve({ port: config.port, hostname: process.env.PANYA_HOST ?? '127.0.0.1', idleTimeout: 255, fetch: app.fetch })
 console.log(`[panya] listening on :${config.port} · seekdb ${config.seekdb.host}:${config.seekdb.port}/${config.seekdb.database} · ${config.embed.model}${config.rerank.enabled ? ` · rerank ${config.rerank.model} (top ${config.rerank.top})` : ''} · ${store.users.loginRequired ? 'login required' : 'API key only'}`)
