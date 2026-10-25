@@ -1,0 +1,672 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>panya · คลังความจำ</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0b0f14; --panel: rgba(14, 20, 28, .86); --field: rgba(10, 15, 22, .9); --line: rgba(160, 180, 200, .22);
+    --ink: #eef2f6; --ink2: #c9d2dc; --muted: #9aa7b6; --accent: #f5a524; --good: #0ca30c; --warn: #fab219; --crit: #e66767;
+    --r: 12px; --tap: 44px;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--ink); font-family: "Leelawadee UI", "Noto Sans Thai", Sarabun, Tahoma, system-ui, sans-serif; line-height: 1.6; display: grid; grid-template-rows: auto 1fr; overflow: hidden; }
+  header { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding: 8px 16px; padding-top: max(8px, env(safe-area-inset-top)); border-bottom: 1px solid var(--line); background: rgba(10, 14, 20, .94); z-index: 5; }
+  h1 { font-size: 18px; margin: 0; font-weight: 600; white-space: nowrap; }
+  h1 b { color: var(--accent); }
+  h1 span { color: var(--muted); font-weight: 400; }
+  :lang(th) h1, :lang(th) h2 { letter-spacing: 0; }
+  .grow { flex: 1 1 auto; }
+  .nav { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .nav a { display: inline-flex; align-items: center; min-height: var(--tap); padding: 0 14px; color: var(--ink2); text-decoration: none; font-size: 14px; }
+  .nav a:hover { background: rgba(245, 165, 36, .18); color: var(--ink); }
+  .nav a[aria-current="page"] { background: rgba(245, 165, 36, .32); color: var(--ink); font-weight: 600; }
+  button { font: inherit; color: var(--ink); background: rgba(40, 50, 64, .9); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; min-height: var(--tap); cursor: pointer; white-space: nowrap; }
+  button:hover { background: rgba(60, 74, 92, .95); }
+  button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  #live { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink2); }
+  #live i { width: 10px; height: 10px; border-radius: 50%; background: var(--good); }
+  #live.off i { background: var(--crit); }
+  main { position: relative; min-height: 0; }
+  #scene { position: absolute; inset: 0; }
+  #scene canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); backdrop-filter: blur(8px); padding: 10px 14px; }
+  #kpis { position: absolute; left: 12px; top: 12px; display: grid; grid-template-columns: repeat(2, minmax(0, 150px)); gap: 8px; }
+  .kpi small { display: block; font-size: 12px; color: var(--muted); }
+  .kpi strong { display: block; font-size: 22px; font-weight: 600; line-height: 1.25; font-variant-numeric: tabular-nums; }
+  #side { position: absolute; right: 12px; top: 12px; width: 330px; max-height: calc(100% - 24px); display: flex; flex-direction: column; gap: 8px; }
+  #info h2, #feedbox h2 { font-size: 13px; margin: 0 0 6px; color: var(--ink2); font-weight: 600; }
+  #info .big { font-size: 20px; font-weight: 600; overflow-wrap: anywhere; }
+  #info dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 6px 0 0; font-size: 13px; }
+  #info dt { color: var(--muted); } #info dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+  #zones { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+  #zones button { display: flex; justify-content: space-between; gap: 8px; text-align: left; font-size: 13px; min-height: 40px; }
+  #zones button small { color: var(--muted); font-variant-numeric: tabular-nums; }
+  #feedbox { min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+  #feed { list-style: none; margin: 0; padding: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+  #feed li { border-left: 3px solid var(--c, var(--muted)); padding: 3px 8px; background: rgba(0, 0, 0, .25); border-radius: 6px; }
+  #feed li.in { --c: #5aa0ff; } #feed li.out { --c: #3ccf91; } #feed li.abstain { --c: #f08a5d; } #feed li.demo { --c: var(--accent); }
+  #feed time { color: var(--muted); margin-right: 6px; font-variant-numeric: tabular-nums; }
+  #legend { position: absolute; left: 12px; bottom: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; font-size: 12px; color: var(--ink2); max-width: calc(100% - 370px); }
+  #legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+  #legend button { font-size: 12px; min-height: 36px; padding: 4px 12px; }
+  #tip { position: fixed; z-index: 9; pointer-events: none; display: none; background: rgba(10, 14, 20, .96); border: 1px solid rgba(245, 165, 36, .5); border-radius: 10px; padding: 8px 11px; font-size: 13px; max-width: 280px; }
+  #tip small { color: var(--muted); display: block; }
+  #loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink2); font-size: 14px; pointer-events: none; }
+  #gate { position: fixed; inset: 0; z-index: 8; display: none; place-items: center; background: rgba(5, 8, 12, .9); padding: 16px; }
+  #gate form { display: flex; flex-direction: column; gap: 8px; width: min(380px, 100%); padding: 20px; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); }
+  #gate input { font: inherit; color: var(--ink); background: var(--field); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; min-height: var(--tap); }
+  #gate p { margin: 0; color: var(--muted); font-size: 14px; }
+  #err { color: var(--crit) !important; }
+  @media (max-width: 900px) {
+    body { overflow: auto; grid-template-rows: auto auto; }
+    main { height: auto; display: flex; flex-direction: column; gap: 8px; padding: 8px; }
+    #scene { position: relative; height: 62vh; border-radius: var(--r); overflow: hidden; }
+    #kpis, #side, #legend { position: static; width: auto; max-width: none; max-height: none; }
+    #kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    #feed { max-height: 220px; }
+  }
+</style>
+<link rel="stylesheet" href="/assets/legacy-light.css?v=1">
+<script src="/assets/ui.js?v=1"></script>
+<script type="importmap">{ "imports": { "three": "/assets/three-module.js" } }</script>
+</head>
+<body>
+<header>
+  <h1><b>panya</b> <span data-i18n="subtitle"></span></h1>
+  <nav class="nav" data-i18n-aria="navAria"><a href="/brain" data-i18n="navBrain"></a><a href="/dashboard" data-i18n="navDash"></a><a href="/warehouse" aria-current="page" data-i18n="navWh"></a></nav>
+  <span id="live"><i></i><span id="live-text"></span></span>
+  <span class="grow"></span>
+  <button id="spin" type="button" aria-pressed="true"></button>
+  <button id="lang" type="button"></button>
+</header>
+<main>
+  <div id="scene" data-i18n-aria="sceneAria" role="img"><div id="loading" data-i18n="loading"></div></div>
+  <section id="kpis" aria-live="polite"></section>
+  <aside id="side">
+    <div class="panel" id="info"></div>
+    <div class="panel" id="feedbox"><h2 data-i18n="feedTitle"></h2><ul id="feed"></ul></div>
+  </aside>
+  <div class="panel" id="legend"></div>
+</main>
+<div id="tip"></div>
+<div id="gate">
+  <form id="login">
+    <p data-i18n="gateHelp"></p>
+    <input id="key" type="password" placeholder="API key" autocomplete="current-password" aria-label="API key" required>
+    <button id="enter" data-i18n="signIn"></button>
+    <p id="err" role="alert"></p>
+  </form>
+</div>
+
+<script type="module">
+import * as THREE from 'three'
+import { OrbitControls } from '/assets/orbit-controls.js'
+
+const $ = (id) => document.getElementById(id)
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+const num = (n) => Math.round(n).toLocaleString('en-US')
+const calm = matchMedia('(prefers-reduced-motion: reduce)').matches
+
+// ---------- สองภาษา (ใช้ค่าเดียวกับหน้าอื่นของ panya) ----------
+const L = {
+  th: {
+    title: 'panya · คลังความจำ', subtitle: '· คลังความจำ', other: 'EN', navAria: 'หน้าหลัก', navBrain: 'สมอง', navDash: 'แดชบอร์ด', navWh: 'คลังสินค้า',
+    sceneAria: 'คลังสินค้าสามมิติ แต่ละโซนคือสมองหนึ่งใบ แต่ละชั้นวางคือหมวดหนึ่งหมวด กล่องบนชั้นแทนความจำ', loading: 'กำลังจัดของเข้าคลัง…',
+    live: (t) => `สด · อัปเดต ${t}`, offline: 'ขาดการเชื่อมต่อ กำลังลองใหม่', spinStop: 'หยุดหมุน', spinGo: 'หมุนกล้อง',
+    kMem: 'ความจำในคลัง', kZones: 'โซน (สมอง)', kShelves: 'ชั้นวาง (หมวด)', kUnit: 'ความจำต่อ 1 กล่อง', kUnitV: (n) => n, kNew: 'รับเข้า 24 ชม.', kBoxes: 'กล่องบนชั้น',
+    zonesTitle: 'โซนในคลัง · กดเพื่อพาไปดู', zoneLabel: (z) => `โซน ${z}`, shelfOther: 'อื่น ๆ', items: (n) => `${n} ความจำ`,
+    pickHint: 'กดชั้นวางเพื่อดูรายละเอียด · ลากเพื่อหมุน · เลื่อนเพื่อซูม',
+    dZone: 'โซน', dCount: 'จำนวนความจำ', dShare: 'สัดส่วนในโซน', dNew: 'รับเข้า 24 ชม.', dLast: 'รับเข้าล่าสุด', dBoxes: 'กล่องบนชั้น', dGroups: 'หมวดที่รวมไว้',
+    back: 'กลับไปดูทั้งคลัง', feedTitle: 'งานรับเข้า–จ่ายออก แบบสด', feedEmpty: 'ยังไม่มีงานเข้าออกตั้งแต่เปิดหน้า เมื่อมีการบันทึกหรือค้นความจำ รถยกจะออกวิ่ง',
+    fIn: (b, g, n) => `รับเข้า ${n} รายการ → ${b} / ${g}`, fOut: (b, n) => `จ่ายออก (ค้นเจอ ${n}) ← ${b}`, fAbs: (b) => `ค้นแล้วไม่พบของ · ${b}`, fDemo: (b, g) => `จำลองการรับเข้า → ${b} / ${g}`,
+    lgBox: 'กล่องความจำ', lgNew: 'รับเข้าใน 24 ชม.', lgPick: 'ชั้นที่ถูกค้น', lgUnit: (n) => `1 กล่อง = ${n} ความจำ`, demo: 'จำลองการรับเข้า',
+    justNow: 'เมื่อครู่', minAgo: (n) => `${n} นาทีที่แล้ว`, hrAgo: (n) => `${n} ชม.ที่แล้ว`, dayAgo: (n) => `${n} วันที่แล้ว`,
+    gateHelp: 'หน้านี้ต้องใช้ API key (เซิร์ฟเวอร์ไม่ได้เปิดให้ดูโดยไม่ใช้ key จากเครือข่ายนี้)', signIn: 'เข้าสู่ระบบ', badKey: 'API key ไม่ถูกต้อง',
+  },
+  en: {
+    title: 'panya · Memory Warehouse', subtitle: '· Memory Warehouse', other: 'ไทย', navAria: 'Main pages', navBrain: 'Brain', navDash: 'Dashboard', navWh: 'Warehouse',
+    sceneAria: '3D warehouse. Each zone is one brain, each rack is one group, and the boxes on it stand for memories.', loading: 'Stocking the shelves…',
+    live: (t) => `Live · updated ${t}`, offline: 'Connection lost, retrying', spinStop: 'Stop rotation', spinGo: 'Rotate camera',
+    kMem: 'Memories stored', kZones: 'Zones (brains)', kShelves: 'Racks (groups)', kUnit: 'Memories per box', kUnitV: (n) => n, kNew: 'Received in 24 h', kBoxes: 'Boxes on racks',
+    zonesTitle: 'Zones · click to fly there', zoneLabel: (z) => `Zone ${z}`, shelfOther: 'Other', items: (n) => `${n} memories`,
+    pickHint: 'Click a rack for details · drag to rotate · scroll to zoom',
+    dZone: 'Zone', dCount: 'Memories', dShare: 'Share of zone', dNew: 'Received in 24 h', dLast: 'Last received', dBoxes: 'Boxes on rack', dGroups: 'Groups folded in',
+    back: 'Back to the whole warehouse', feedTitle: 'Inbound and outbound, live', feedEmpty: 'Nothing has moved since this page opened. When a memory is stored or searched, a forklift goes to work.',
+    fIn: (b, g, n) => `Received ${n} → ${b} / ${g}`, fOut: (b, n) => `Picked (search found ${n}) ← ${b}`, fAbs: (b) => `Searched, nothing on the shelf · ${b}`, fDemo: (b, g) => `Demo delivery → ${b} / ${g}`,
+    lgBox: 'Memory box', lgNew: 'Received in 24 h', lgPick: 'Rack hit by a search', lgUnit: (n) => `1 box = ${n} memories`, demo: 'Demo a delivery',
+    justNow: 'just now', minAgo: (n) => `${n} min ago`, hrAgo: (n) => `${n} h ago`, dayAgo: (n) => `${n} d ago`,
+    gateHelp: 'This page needs an API key (the server does not allow keyless viewing from this network).', signIn: 'Sign in', badKey: 'That API key is not valid',
+  },
+}
+let lang = (() => { try { return localStorage.getItem('panya.lang') } catch { return null } })() || ((navigator.language || 'th').toLowerCase().startsWith('th') ? 'th' : 'en')
+const t = (k, ...a) => { const v = L[lang][k]; return typeof v === 'function' ? v(...a) : v }
+const loc = () => (lang === 'th' ? 'th-TH' : 'en-GB')
+const ago = (ms) => { const s = Math.max(0, (Date.now() - ms) / 1000); return s < 60 ? t('justNow') : s < 3600 ? t('minAgo', Math.floor(s / 60)) : s < 86400 ? t('hrAgo', Math.floor(s / 3600)) : t('dayAgo', Math.floor(s / 86400)) }
+function applyLang() {
+  document.documentElement.lang = lang; document.title = t('title')
+  for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.dataset.i18n)
+  for (const el of document.querySelectorAll('[data-i18n-aria]')) el.setAttribute('aria-label', t(el.dataset.i18nAria))
+  $('lang').textContent = t('other'); $('spin').textContent = t(controls?.autoRotate === false ? 'spinGo' : 'spinStop')
+}
+
+// ---------- ข้อมูล ----------
+let key = sessionStorage.getItem('panya.key') || ''
+const auth = () => (key ? { authorization: 'Bearer ' + key } : {})
+const getJSON = async (path) => {
+  const r = await fetch(path, { headers: auth() })
+  if (r.status === 401) throw Object.assign(new Error(t('badKey')), { auth: true })
+  if (!r.ok) throw new Error('HTTP ' + r.status)
+  return r.json()
+}
+// โครงคลังที่คำนวณจากข้อมูล: โซนละสมอง ชั้นละหมวด (หมวดใหญ่สุด 7 หมวด ที่เหลือรวมเป็น "อื่น ๆ")
+let wh = null // { zones: [{ brain, letter, live, lastAt, shelves: [{ name, count, recent, lastAt, groups }] }], unit }
+const MAX_SHELVES = 10, BAYS_MAX = 10, LEVELS = 4, PER_SLOT = 8
+async function loadWarehouse() {
+  const ov = await getJSON('/v1/overview')
+  const brains = ov.brains.slice().sort((a, b) => b.live - a.live)
+  const zones = await Promise.all(brains.map(async (b, i) => {
+    let shelves = []
+    try {
+      const p = await getJSON('/v1/points?brain=' + encodeURIComponent(b.brain))
+      const counts = new Map(), recent = new Map(), last = new Map(), day = Date.now() - 86400000
+      p.g.forEach((gi, k) => {
+        const name = p.groups[gi]
+        counts.set(name, (counts.get(name) || 0) + 1)
+        if (p.t[k] > day) recent.set(name, (recent.get(name) || 0) + 1)
+        last.set(name, Math.max(last.get(name) || 0, p.t[k]))
+      })
+      const sorted = [...counts.entries()].sort((x, y) => y[1] - x[1])
+      shelves = sorted.slice(0, MAX_SHELVES - 1).map(([name, count]) => ({ name, count, recent: recent.get(name) || 0, lastAt: last.get(name) || 0, groups: [name] }))
+      const rest = sorted.slice(MAX_SHELVES - 1)
+      if (rest.length) shelves.push({ name: '*other', count: rest.reduce((s, [, c]) => s + c, 0), recent: rest.reduce((s, [n]) => s + (recent.get(n) || 0), 0), lastAt: Math.max(...rest.map(([n]) => last.get(n) || 0)), groups: rest.map(([n]) => n) })
+    } catch { shelves = [{ name: '*other', count: b.live, recent: 0, lastAt: b.lastAt, groups: [] }] }
+    return { brain: b.brain, letter: String.fromCharCode(65 + i), live: b.live, lastAt: b.lastAt, recent24: b.hour.reduce((s, x) => s + x, 0), shelves }
+  }))
+  // หน่วยของกล่อง: ตัวเลขกลม ๆ ที่ทำให้ชั้นที่ใหญ่ที่สุดยังวางพอ
+  const biggest = Math.max(1, ...zones.flatMap((z) => z.shelves.map((s) => s.count)))
+  const cap = BAYS_MAX * LEVELS * PER_SLOT
+  const unit = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 5000].find((u) => biggest / u <= cap) || 10000
+  return { zones, unit, viewer: ov.viewer === true, now: ov.now }
+}
+const shelfName = (s) => (s.name === '*other' ? t('shelfOther') : s.name)
+
+// ---------- ฉาก ----------
+const host = $('scene')
+const renderer = new THREE.WebGLRenderer({ antialias: true })
+renderer.setPixelRatio(Math.min(2, devicePixelRatio || 1))
+renderer.shadowMap.enabled = true
+renderer.shadowMap.type = THREE.PCFSoftShadowMap
+renderer.outputColorSpace = THREE.SRGBColorSpace
+renderer.toneMapping = THREE.ACESFilmicToneMapping
+renderer.toneMappingExposure = 1.05
+host.appendChild(renderer.domElement)
+const scene = new THREE.Scene()
+scene.background = new THREE.Color('#1a1f26')
+scene.fog = new THREE.Fog('#1a1f26', 60, 140)
+const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 400)
+const controls = new OrbitControls(camera, renderer.domElement)
+controls.enableDamping = true; controls.dampingFactor = 0.08
+controls.maxPolarAngle = Math.PI * 0.47; controls.minDistance = 6; controls.maxDistance = 110
+controls.autoRotate = (() => { try { return localStorage.getItem('panya.spin') !== '0' } catch { return true } })()
+controls.autoRotateSpeed = 0.35 // ช้า ๆ ราว 3 นาทีต่อรอบ
+
+scene.add(new THREE.HemisphereLight('#dfe8f5', '#3a3127', 0.9))
+const sun = new THREE.DirectionalLight('#fff4e0', 1.6)
+sun.castShadow = true
+sun.shadow.mapSize.set(2048, 2048)
+sun.shadow.bias = -0.0004
+scene.add(sun, sun.target)
+
+// วัสดุที่ใช้ร่วมกัน
+const M = {
+  upright: new THREE.MeshStandardMaterial({ color: '#1f5fa8', roughness: 0.55, metalness: 0.5 }),
+  beam: new THREE.MeshStandardMaterial({ color: '#e8771c', roughness: 0.5, metalness: 0.45 }),
+  deck: new THREE.MeshStandardMaterial({ color: '#8d969f', roughness: 0.7, metalness: 0.6 }),
+  pallet: new THREE.MeshStandardMaterial({ color: '#a77b4f', roughness: 0.9 }),
+  box: new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.85 }),
+  wall: new THREE.MeshStandardMaterial({ color: '#59616b', roughness: 0.9, metalness: 0.2 }),
+  door: new THREE.MeshStandardMaterial({ color: '#c9ced4', roughness: 0.6, metalness: 0.6 }),
+  lamp: new THREE.MeshStandardMaterial({ color: '#ffffff', emissive: '#fff6dc', emissiveIntensity: 1.6 }),
+  yellow: new THREE.MeshStandardMaterial({ color: '#f2b705', roughness: 0.45, metalness: 0.3 }),
+  dark: new THREE.MeshStandardMaterial({ color: '#23272d', roughness: 0.6, metalness: 0.5 }),
+  tyre: new THREE.MeshStandardMaterial({ color: '#141414', roughness: 0.95 }),
+  fork: new THREE.MeshStandardMaterial({ color: '#2d3138', roughness: 0.4, metalness: 0.8 }),
+  beacon: new THREE.MeshStandardMaterial({ color: '#ff9a1f', emissive: '#ff8a00', emissiveIntensity: 0 }),
+}
+const BOX_COLOR = new THREE.Color('#b8875a'), BOX_NEW = new THREE.Color('#f0cd84'), BOX_HIT = new THREE.Color('#5fe0a8')
+const ZONE_COLORS = ['#3b82f6', '#22c55e', '#f59e0b', '#e879f9', '#14b8a6', '#f43f5e', '#a3e635', '#38bdf8']
+
+// พื้นคอนกรีตลายเส้นจาง ๆ วาดบน canvas
+function concreteTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 512
+  const g = c.getContext('2d')
+  g.fillStyle = '#6f747a'; g.fillRect(0, 0, 512, 512)
+  for (let i = 0; i < 9000; i++) { const v = 95 + Math.random() * 40 | 0; g.fillStyle = `rgba(${v},${v},${v + 4},.18)`; g.fillRect(Math.random() * 512, Math.random() * 512, 2, 2) }
+  g.strokeStyle = 'rgba(40,44,50,.35)'; g.lineWidth = 2; g.strokeRect(0, 0, 512, 512)
+  const tex = new THREE.CanvasTexture(c); tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8
+  return tex
+}
+// ป้ายตัวหนังสือ (ภาษาไทยได้) เป็นแผ่นภาพในฉาก
+function makeSign(lines, { w = 4, bg = '#10151c', fg = '#ffffff', accent = '#f5a524', size = 64 } = {}) {
+  const c = document.createElement('canvas'), pad = 28, lh = size * 1.3
+  c.width = 1024; c.height = Math.ceil(pad * 2 + lh * lines.length)
+  const g = c.getContext('2d')
+  g.fillStyle = bg; g.fillRect(0, 0, c.width, c.height)
+  g.fillStyle = accent; g.fillRect(0, 0, 14, c.height)
+  lines.forEach((ln, i) => {
+    g.font = `${i ? 400 : 700} ${i ? size * 0.72 : size}px "Leelawadee UI","Noto Sans Thai",Sarabun,Tahoma,sans-serif`
+    g.fillStyle = i ? '#c9d2dc' : fg; g.textBaseline = 'middle'
+    let s = ln; while (g.measureText(s).width > c.width - pad * 2 - 20 && s.length > 3) s = s.slice(0, -2)
+    if (s !== ln) s += '…'
+    g.fillText(s, pad + 20, pad + lh * (i + 0.5))
+  })
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8
+  const h = w * (c.height / c.width)
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.DoubleSide }))
+  mesh.userData.h = h
+  return mesh
+}
+
+// ---------- ขนาดของคลัง ----------
+const BAY = 2.0, DEPTH = 1.1, LEVEL_Y = [0.14, 1.3, 2.46, 3.62], RACK_H = 4.6, AISLE = 3.8, GAP = 1.2, ZONE_W = DEPTH * 2 + AISLE + 3.2, DOCK_Z = -7
+let world = null           // กลุ่มของทุกอย่างที่สร้างจากข้อมูล (สร้างใหม่เมื่อโครงคลังเปลี่ยน)
+let racks = []             // { zone, shelf, center, facing (+1/-1), bays, side, hit, slots: [{x,y,z}] , boxIdx: [] }
+let boxMesh = null, palletMesh = null, layoutKey = ''
+const hitTargets = []
+
+function buildWorld(data) {
+  if (world) { scene.remove(world); world.traverse((o) => { o.geometry?.dispose?.(); if (o.material?.map) o.material.map.dispose() }) }
+  world = new THREE.Group(); scene.add(world)
+  racks = []; hitTargets.length = 0
+
+  // จัดชั้นของแต่ละโซนเป็นสองแถวสองฝั่งทางเดิน ชั้นใหญ่ก่อน แถวที่สั้นกว่าได้ชั้นถัดไป
+  let maxLen = 0
+  data.zones.forEach((z, zi) => {
+    const zx = zi * ZONE_W, rows = [{ side: -1, z: 0 }, { side: 1, z: 0 }]
+    z.x = zx
+    for (const s of z.shelves) {
+      const boxes = Math.ceil(s.count / data.unit)
+      const bays = Math.max(1, Math.min(BAYS_MAX, Math.ceil(boxes / (LEVELS * PER_SLOT))))
+      const row = rows[0].z <= rows[1].z ? rows[0] : rows[1]
+      const len = bays * BAY
+      racks.push({ zone: z, shelf: s, boxes, bays, side: row.side, z0: row.z, len, x: zx + row.side * (AISLE / 2 + DEPTH / 2) })
+      row.z += len + GAP
+    }
+    z.len = Math.max(rows[0].z, rows[1].z, 6)
+    maxLen = Math.max(maxLen, z.len)
+  })
+  const width = Math.max(1, data.zones.length) * ZONE_W, x0 = -ZONE_W / 2 - 2, x1 = width - ZONE_W / 2 + 2, zEnd = maxLen + 4
+  data.bounds = { x0, x1, z0: DOCK_Z - 1, z1: zEnd }
+
+  // พื้น ผนัง ประตูรับของ โคมไฟ
+  const floorTex = concreteTexture(); floorTex.repeat.set((x1 - x0) / 4, (zEnd - DOCK_Z + 1) / 4)
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, zEnd - DOCK_Z + 1), new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.92 }))
+  floor.rotation.x = -Math.PI / 2; floor.position.set((x0 + x1) / 2, 0, (DOCK_Z - 1 + zEnd) / 2); floor.receiveShadow = true
+  world.add(floor)
+  const wallH = 7.5
+  const addWall = (w, h, x, y, z, ry) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.25), M.wall); m.position.set(x, y, z); m.rotation.y = ry; m.receiveShadow = true; world.add(m) }
+  addWall(x1 - x0, wallH, (x0 + x1) / 2, wallH / 2, zEnd, 0)
+  addWall(zEnd - DOCK_Z + 1, wallH, x0, wallH / 2, (DOCK_Z - 1 + zEnd) / 2, Math.PI / 2)
+  addWall(zEnd - DOCK_Z + 1, wallH, x1, wallH / 2, (DOCK_Z - 1 + zEnd) / 2, Math.PI / 2)
+  // เส้นทางเดินรถยกและกรอบโซนสีตามโซน
+  const lineMat = new THREE.MeshBasicMaterial({ color: '#f2c94c' })
+  data.zones.forEach((z, zi) => {
+    const col = new THREE.Color(ZONE_COLORS[zi % ZONE_COLORS.length])
+    const tint = new THREE.Mesh(new THREE.PlaneGeometry(ZONE_W - 0.8, z.len + 2), new THREE.MeshStandardMaterial({ color: col, transparent: true, opacity: 0.12, roughness: 1 }))
+    tint.rotation.x = -Math.PI / 2; tint.position.set(z.x, 0.01, z.len / 2 - 0.5); world.add(tint)
+    for (const sx of [-1, 1]) {
+      const ln = new THREE.Mesh(new THREE.PlaneGeometry(0.12, z.len + 6), lineMat)
+      ln.rotation.x = -Math.PI / 2; ln.position.set(z.x + sx * (AISLE / 2 - 0.35), 0.02, z.len / 2 - 3); world.add(ln)
+    }
+    // ประตูม้วนที่ผนังหน้าและป้ายโซนแขวน
+    const door = new THREE.Mesh(new THREE.BoxGeometry(3.4, 4, 0.18), M.door); door.position.set(z.x, 2, DOCK_Z - 0.6); world.add(door)
+    for (let k = 0; k < 9; k++) { const rib = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.05, 0.22), M.dark); rib.position.set(z.x, 0.3 + k * 0.42, DOCK_Z - 0.55); world.add(rib) }
+    const sign = makeSign([`${t('zoneLabel', z.letter)} · ${z.brain}`, t('items', num(z.live))], { w: 5, accent: ZONE_COLORS[zi % ZONE_COLORS.length], size: 70 })
+    // ป้ายแขวนหันออกทางประตู (ฝั่งที่กล้องมองเข้ามา)
+    sign.position.set(z.x, 6.2, DOCK_Z + 1.2); sign.rotation.y = Math.PI; world.add(sign)
+    z.signMesh = sign
+  })
+  const frontL = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0, 3.5, 0.25), M.wall); frontL.position.set((x0 + x1) / 2, 4 + 1.75, DOCK_Z - 0.7); world.add(frontL)
+  // โคมไฟเพดานเป็นแถวเหนือทางเดิน
+  data.zones.forEach((z) => { for (let zz = 0; zz < z.len; zz += 6) { const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.08, 2.2), M.lamp); lamp.position.set(z.x, wallH - 0.4, zz + 1); world.add(lamp) } })
+
+  // ชั้นวาง: เสา คาน แผ่นรอง (InstancedMesh ชุดละหนึ่ง draw call)
+  const uprightG = new THREE.BoxGeometry(0.09, RACK_H, 0.09), beamG = new THREE.BoxGeometry(BAY, 0.11, 0.07), deckG = new THREE.BoxGeometry(BAY - 0.05, 0.03, DEPTH)
+  const ups = [], beams = [], decks = []
+  const mat4 = (x, y, z, ry = 0) => new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), ry), new THREE.Vector3(1, 1, 1))
+  const slots = []
+  for (const r of racks) {
+    r.slots = []
+    // แกนยาวของชั้นวางวางตามแนว z
+    for (let b = 0; b <= r.bays; b++) for (const dz of [-DEPTH / 2, DEPTH / 2]) ups.push(mat4(r.x + dz, RACK_H / 2, r.z0 + b * BAY))
+    for (let b = 0; b < r.bays; b++) {
+      const cz = r.z0 + b * BAY + BAY / 2
+      for (const ly of LEVEL_Y) {
+        const y = ly + (ly > 0.2 ? 0 : 0)
+        if (ly > 0.2) { for (const dz of [-DEPTH / 2, DEPTH / 2]) beams.push(mat4(r.x + dz, y - 0.06, cz, Math.PI / 2)); decks.push(mat4(r.x, y - 0.01, cz, Math.PI / 2)) }
+        r.slots.push({ x: r.x, y: ly + 0.02, z: cz })
+      }
+    }
+    // ผนังล่องหนสำหรับรับการชี้และกด
+    const hit = new THREE.Mesh(new THREE.BoxGeometry(DEPTH + 0.3, RACK_H, r.len), new THREE.MeshBasicMaterial({ visible: false }))
+    hit.position.set(r.x, RACK_H / 2, r.z0 + r.len / 2); hit.userData.rack = r; world.add(hit); hitTargets.push(hit); r.hit = hit
+    // ป้ายชื่อชั้นที่หัวชั้น หันออกทางเดิน
+    const s = makeSign([shelfName(r.shelf), t('items', num(r.shelf.count))], { w: 1.9, accent: ZONE_COLORS[data.zones.indexOf(r.zone) % ZONE_COLORS.length], size: 76 })
+    s.position.set(r.x - r.side * (DEPTH / 2 + 0.02), RACK_H + 0.15 + s.userData.h / 2, r.z0 + 0.95); s.rotation.y = -r.side * Math.PI / 2
+    world.add(s)
+    // กรอบเรืองแสงตอนชั้นถูกค้น (ซ่อนไว้ก่อน)
+    const glow = new THREE.Mesh(new THREE.BoxGeometry(DEPTH + 0.4, RACK_H + 0.2, r.len + 0.2), new THREE.MeshBasicMaterial({ color: '#5fe0a8', transparent: true, opacity: 0, depthWrite: false }))
+    glow.position.copy(hit.position); world.add(glow); r.glow = glow; r.glowT = 0
+  }
+  const inst = (geo, mat, list, shadow = true) => { const m = new THREE.InstancedMesh(geo, mat, Math.max(1, list.length)); list.forEach((x, i) => m.setMatrixAt(i, x)); m.count = list.length; m.castShadow = shadow; m.receiveShadow = true; world.add(m); return m }
+  inst(uprightG, M.upright, ups); inst(beamG, M.beam, beams); inst(deckG, M.deck, decks, false)
+  // พาเลทและกล่อง: เผื่อจำนวนสูงสุด แล้วตั้ง count ตามข้อมูลจริงใน fillBoxes()
+  const totalSlots = racks.reduce((s, r) => s + r.slots.length, 0)
+  palletMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1.0, 0.14, 1.2), M.pallet, Math.max(1, totalSlots)); palletMesh.castShadow = true; palletMesh.receiveShadow = true; world.add(palletMesh)
+  boxMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(0.46, 0.4, 0.54), M.box, Math.max(1, totalSlots * PER_SLOT)); boxMesh.castShadow = true; boxMesh.receiveShadow = true; world.add(boxMesh)
+  boxMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(Math.max(1, totalSlots * PER_SLOT) * 3), 3)
+
+  // แสงแดดครอบคลุมทั้งคลัง
+  const cx = (x0 + x1) / 2, cz = (DOCK_Z + zEnd) / 2, span = Math.max(x1 - x0, zEnd - DOCK_Z)
+  sun.position.set(cx - span * 0.35, span * 0.9, cz - span * 0.5); sun.target.position.set(cx, 0, cz)
+  Object.assign(sun.shadow.camera, { left: -span * 0.75, right: span * 0.75, top: span * 0.75, bottom: -span * 0.75, near: 1, far: span * 3 }); sun.shadow.camera.updateProjectionMatrix()
+  fillBoxes(data)
+  buildForklifts(data)
+}
+
+// วางกล่องตามจำนวนจริง: เติมจากชั้นล่างขึ้นบน ช่องละ 8 กล่อง (2 x 2 x 2) · กล่องที่เข้ามาใน 24 ชม. สีอ่อน
+function fillBoxes(data) {
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3()
+  let bi = 0, pi = 0
+  for (const r of racks) {
+    r.boxes = Math.ceil(r.shelf.count / data.unit)
+    const fresh = Math.ceil(r.shelf.recent / data.unit)
+    const order = r.slots.slice().sort((a, b) => a.y - b.y || a.z - b.z)
+    r.boxIdx = []
+    let left = Math.min(r.boxes, order.length * PER_SLOT)
+    for (const s of order) {
+      if (left <= 0) break
+      palletMesh.setMatrixAt(pi++, m.compose(p.set(s.x, s.y + 0.07, s.z), q.identity(), one))
+      for (let k = 0; k < PER_SLOT && left > 0; k++, left--) {
+        const ix = k & 1, iz = (k >> 1) & 1, iy = k >> 2
+        const jitter = ((bi * 9301 + 49297) % 233280) / 233280
+        q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), (jitter - 0.5) * 0.08)
+        boxMesh.setMatrixAt(bi, m.compose(p.set(s.x + (ix - 0.5) * 0.5, s.y + 0.14 + 0.2 + iy * 0.41, s.z + (iz - 0.5) * 0.56), q, one))
+        // กล่องบนสุดของชั้นคือของที่เพิ่งเข้ามา
+        const isNew = r.boxes - left < fresh
+        boxMesh.setColorAt(bi, isNew ? BOX_NEW : BOX_COLOR.clone().offsetHSL(0, 0, (jitter - 0.5) * 0.08))
+        r.boxIdx.push(bi); bi++
+      }
+    }
+    r.topSlot = order[Math.min(order.length - 1, Math.floor(Math.max(0, r.boxes - 1) / PER_SLOT) + 1)] || order[order.length - 1]
+  }
+  palletMesh.count = pi; boxMesh.count = bi
+  palletMesh.instanceMatrix.needsUpdate = true; boxMesh.instanceMatrix.needsUpdate = true; boxMesh.instanceColor.needsUpdate = true
+  data.boxesShown = bi
+}
+
+// ---------- รถยก ----------
+// หนึ่งคันต่อโซน จอดที่หน้าประตูรับของ วิ่งเฉพาะเมื่อมีงานจริง (หรือเมื่อกดจำลอง)
+let forklifts = []
+function forkliftModel(colorHex) {
+  const g = new THREE.Group()
+  const add = (geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; g.add(m); return m }
+  add(new THREE.BoxGeometry(1.1, 0.7, 1.9), M.yellow, 0, 0.62, -0.1)                 // ตัวรถ
+  add(new THREE.BoxGeometry(1.1, 0.55, 0.45), M.dark, 0, 0.75, -1.15)                // ถ่วงน้ำหนัก
+  add(new THREE.BoxGeometry(0.55, 0.45, 0.55), M.dark, 0, 1.18, -0.35)              // เบาะ
+  for (const [x, z] of [[-0.5, -0.9], [0.5, -0.9], [-0.5, 0.2], [0.5, 0.2]]) { const w = add(new THREE.CylinderGeometry(0.26, 0.26, 0.22, 18), M.tyre, x * 1.04, 0.26, z); w.rotation.z = Math.PI / 2 }
+  for (const x of [-0.5, 0.5]) for (const z of [-0.95, 0.35]) add(new THREE.BoxGeometry(0.06, 1.3, 0.06), M.dark, x, 1.6, z) // โครงหลังคา
+  add(new THREE.BoxGeometry(1.1, 0.06, 1.4), M.dark, 0, 2.25, -0.3)                 // หลังคา
+  for (const x of [-0.42, 0.42]) add(new THREE.BoxGeometry(0.1, 4.3, 0.12), M.fork, x, 2.2, 0.82) // เสายก
+  const carriage = new THREE.Group(); carriage.position.set(0, 0.14, 0.9); g.add(carriage)
+  const cb = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.5, 0.06), M.fork); cb.position.set(0, 0.25, 0); cb.castShadow = true; carriage.add(cb)
+  for (const x of [-0.28, 0.28]) { const f = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.05, 1.15), M.fork); f.position.set(x, 0.02, 0.6); f.castShadow = true; carriage.add(f) }
+  const load = new THREE.Group(); load.visible = false; load.position.set(0, 0.06, 0.62); carriage.add(load)
+  const lp = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.14, 1.2), M.pallet); lp.castShadow = true; load.add(lp)
+  for (let k = 0; k < 4; k++) { const b = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.4, 0.54), new THREE.MeshStandardMaterial({ color: BOX_NEW, roughness: 0.85 })); b.position.set(((k & 1) - 0.5) * 0.5, 0.27, ((k >> 1) - 0.5) * 0.56); b.castShadow = true; load.add(b) }
+  const beacon = add(new THREE.SphereGeometry(0.11, 12, 8), M.beacon.clone(), 0, 2.36, -0.6)
+  const stripe = add(new THREE.BoxGeometry(1.12, 0.12, 0.6), new THREE.MeshStandardMaterial({ color: colorHex, roughness: 0.5 }), 0, 0.95, -0.55)
+  return { g, carriage, load, beacon, stripe }
+}
+function buildForklifts(data) {
+  const keep = new Map(forklifts.map((f) => [f.zone.brain, f]))
+  forklifts = data.zones.map((z, zi) => {
+    const old = keep.get(z.brain)
+    const m = forkliftModel(ZONE_COLORS[zi % ZONE_COLORS.length])
+    const home = { x: z.x + 1.2, z: DOCK_Z + 2.4 }
+    const f = { zone: z, ...m, home, pos: { x: home.x, z: home.z }, yaw: 0, lift: 0, queue: old ? old.queue : [], task: null, step: 0 }
+    m.g.position.set(home.x, 0, home.z); world.add(m.g)
+    return f
+  })
+}
+// งานหนึ่งงาน = ลำดับการเคลื่อนที่: รับพาเลทที่ประตู → วิ่งเข้าทางเดิน → หันเข้าชั้น → ยกขึ้น → วาง → ถอยกลับที่จอด
+function planDelivery(f, rack) {
+  const s = rack.topSlot || rack.slots[0], aisleX = f.zone.x, faceYaw = rack.side < 0 ? -Math.PI / 2 : Math.PI / 2
+  const standX = aisleX + rack.side * 0.2
+  return [
+    { k: 'load' },
+    { k: 'move', x: aisleX, z: DOCK_Z + 4 },
+    { k: 'move', x: aisleX, z: s.z },
+    { k: 'turn', yaw: faceYaw },
+    { k: 'lift', h: Math.max(0, s.y - 0.06) },
+    { k: 'move', x: standX + rack.side * 0.55, z: s.z },
+    { k: 'drop', rack },
+    { k: 'move', x: standX, z: s.z },
+    { k: 'lift', h: 0 },
+    { k: 'move', x: aisleX, z: DOCK_Z + 4 },
+    { k: 'move', x: f.home.x, z: f.home.z },
+    { k: 'turn', yaw: 0 },
+  ]
+}
+const SPEED = 4.2, TURN = 2.4, LIFT = 1.6
+function stepForklift(f, dt) {
+  if (!f.task && f.queue.length) { const job = f.queue.shift(); f.task = planDelivery(f, job.rack); f.step = 0; f.job = job }
+  if (!f.task) { f.beacon.material.emissiveIntensity = 0; return }
+  f.beacon.material.emissiveIntensity = (Math.sin(performance.now() / 120) > 0 ? 2.2 : 0.2)
+  const st = f.task[f.step]
+  if (!st) { f.task = null; return }
+  let done = false
+  if (st.k === 'load') { f.load.visible = true; done = true }
+  else if (st.k === 'drop') { f.load.visible = false; flashRack(st.rack, '#f0cd84'); done = true }
+  else if (st.k === 'lift') { const d = st.h - f.lift, s = Math.sign(d) * Math.min(Math.abs(d), LIFT * dt); f.lift += s; done = Math.abs(st.h - f.lift) < 1e-3 }
+  else if (st.k === 'turn') { let d = st.yaw - f.yaw; d = Math.atan2(Math.sin(d), Math.cos(d)); const s = Math.sign(d) * Math.min(Math.abs(d), TURN * dt); f.yaw += s; done = Math.abs(d) < 1e-3 }
+  else if (st.k === 'move') {
+    const dx = st.x - f.pos.x, dz = st.z - f.pos.z, dist = Math.hypot(dx, dz)
+    if (dist < 1e-3) done = true
+    else {
+      // หันไปทางที่จะวิ่งก่อน (ถอยหลังถ้าระยะสั้นและอยู่ตรงหน้าชั้น)
+      const want = Math.atan2(dx, dz), reverse = dist < 1.2 && Math.abs(Math.atan2(Math.sin(want - f.yaw - Math.PI), Math.cos(want - f.yaw - Math.PI))) < 0.3
+      const target = reverse ? f.yaw : want
+      let d = Math.atan2(Math.sin(target - f.yaw), Math.cos(target - f.yaw))
+      if (Math.abs(d) > 0.02 && !(dist < 1.2)) f.yaw += Math.sign(d) * Math.min(Math.abs(d), TURN * dt)
+      else { const s = Math.min(dist, SPEED * dt * (dist < 1.2 ? 0.4 : 1)); f.pos.x += (dx / dist) * s; f.pos.z += (dz / dist) * s }
+    }
+  }
+  if (done) f.step++
+  f.g.position.set(f.pos.x, 0, f.pos.z); f.g.rotation.y = f.yaw; f.carriage.position.y = 0.14 + f.lift
+}
+
+// ชั้นที่ถูกค้นหรือเพิ่งรับของ: กรอบเรืองแสงจางลงใน 2.5 วินาที
+function flashRack(rack, color) { rack.glow.material.color.set(color); rack.glowT = 2.5 }
+// ชั้นที่จะรับของ: หาตามหมวดของเหตุการณ์ ถ้าไม่รู้หมวดใช้ชั้นแรกของโซน
+function rackFor(brain, group) {
+  const zr = racks.filter((r) => r.zone.brain === brain)
+  return zr.find((r) => r.shelf.groups.includes(group)) || zr.find((r) => r.shelf.name === '*other') || zr[0]
+}
+
+// ---------- แผงข้อมูล ----------
+let selected = null
+function renderKpis(data) {
+  const all = data.zones.reduce((s, z) => s + z.live, 0), recent = data.zones.reduce((s, z) => s + z.recent24, 0)
+  const tiles = [[t('kMem'), num(all)], [t('kZones'), num(data.zones.length)], [t('kShelves'), num(racks.length)], [t('kNew'), num(recent)], [t('kUnit'), t('kUnitV', num(data.unit))], [t('kBoxes'), num(data.boxesShown)]]
+  $('kpis').innerHTML = tiles.map(([k, v]) => `<div class="panel kpi"><small>${k}</small><strong>${v}</strong></div>`).join('')
+  $('legend').innerHTML = `<span><i style="background:#b8875a"></i>${t('lgBox')}</span><span><i style="background:#f0cd84"></i>${t('lgNew')}</span><span><i style="background:#5fe0a8"></i>${t('lgPick')}</span><span>${t('lgUnit', num(data.unit))}</span><span>${t('pickHint')}</span><button id="demo" type="button">${t('demo')}</button>`
+  $('demo').onclick = () => {
+    const r = selected || racks[Math.floor(Math.random() * racks.length)]
+    if (!r) return
+    const f = forklifts.find((x) => x.zone === r.zone)
+    if (f && f.queue.length < 3) f.queue.push({ rack: r })
+    pushFeed('demo', t('fDemo', r.zone.brain, shelfName(r.shelf)))
+  }
+}
+function renderInfo() {
+  const data = wh
+  if (!data) return
+  if (selected) {
+    const r = selected, s = r.shelf, share = r.zone.live ? (s.count / r.zone.live) * 100 : 0
+    $('info').innerHTML = `<h2>${esc(t('zoneLabel', r.zone.letter))} · ${esc(r.zone.brain)}</h2><div class="big">${esc(shelfName(s))}</div><dl>
+      <dt>${t('dCount')}</dt><dd>${num(s.count)}</dd><dt>${t('dShare')}</dt><dd>${share.toFixed(1)}%</dd><dt>${t('dNew')}</dt><dd>${num(s.recent)}</dd>
+      <dt>${t('dLast')}</dt><dd>${s.lastAt ? ago(s.lastAt) : '-'}</dd><dt>${t('dBoxes')}</dt><dd>${num(r.boxIdx?.length || 0)} × ${num(data.unit)}</dd>
+      ${s.name === '*other' ? `<dt>${t('dGroups')}</dt><dd>${num(s.groups.length)}</dd>` : ''}</dl>
+      <div id="zones"><button type="button" id="back">${t('back')}</button></div>`
+    $('back').onclick = () => { selected = null; flyTo(null); renderInfo() }
+  } else {
+    $('info').innerHTML = `<h2>${t('zonesTitle')}</h2><div id="zones">${data.zones.map((z, i) => `<button type="button" data-i="${i}"><span><b style="color:${ZONE_COLORS[i % ZONE_COLORS.length]}">${t('zoneLabel', z.letter)}</b> · ${esc(z.brain)}</span><small>${num(z.live)}</small></button>`).join('')}</div>`
+    for (const b of $('zones').querySelectorAll('button')) b.onclick = () => flyToZone(data.zones[Number(b.dataset.i)])
+  }
+}
+const feedItems = []
+function pushFeed(cls, text, at = Date.now()) {
+  feedItems.unshift({ cls, text, at }); feedItems.length = Math.min(feedItems.length, 30)
+  $('feed').innerHTML = feedItems.map((f) => `<li class="${f.cls}"><time>${new Date(f.at).toLocaleTimeString(loc(), { hour12: false })}</time>${esc(f.text)}</li>`).join('')
+}
+function feedEmpty() { if (!feedItems.length) $('feed').innerHTML = `<li>${esc(t('feedEmpty'))}</li>` }
+
+// ---------- กล้อง ----------
+let fly = null
+function flyTo(target, pos) {
+  const b = wh?.bounds
+  if (!target && b) { target = new THREE.Vector3((b.x0 + b.x1) / 2, 1.5, (b.z0 + b.z1) / 2); const span = Math.max(b.x1 - b.x0, b.z1 - b.z0); pos = new THREE.Vector3(target.x - span * 0.55, span * 0.6, b.z0 - span * 0.35) }
+  fly = { t: 0, fromT: controls.target.clone(), fromP: camera.position.clone(), toT: target, toP: pos }
+}
+function flyToRack(r) { flyTo(new THREE.Vector3(r.x, 2, r.z0 + r.len / 2), new THREE.Vector3(r.zone.x - r.side * 4.5, 5.5, r.z0 + r.len / 2 - 7)) }
+function flyToZone(z) { flyTo(new THREE.Vector3(z.x, 1.5, z.len / 2), new THREE.Vector3(z.x - 9, 11, -4)) }
+
+// ชี้และกดชั้นวาง
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2()
+let hoverRack = null, downAt = null
+function rackAt(ev) {
+  const r = renderer.domElement.getBoundingClientRect()
+  ndc.set(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1)
+  ray.setFromCamera(ndc, camera)
+  return ray.intersectObjects(hitTargets, false)[0]?.object.userData.rack || null
+}
+renderer.domElement.addEventListener('pointermove', (ev) => {
+  hoverRack = rackAt(ev)
+  renderer.domElement.style.cursor = hoverRack ? 'pointer' : 'grab'
+  const tip = $('tip')
+  if (!hoverRack) { tip.style.display = 'none'; return }
+  const s = hoverRack.shelf
+  tip.innerHTML = `<b>${esc(shelfName(s))}</b><small>${esc(t('zoneLabel', hoverRack.zone.letter))} · ${esc(hoverRack.zone.brain)} · ${t('items', num(s.count))}</small>`
+  tip.style.display = 'block'
+  tip.style.left = Math.min(ev.clientX + 14, innerWidth - tip.offsetWidth - 8) + 'px'; tip.style.top = Math.max(8, ev.clientY - tip.offsetHeight - 10) + 'px'
+})
+renderer.domElement.addEventListener('pointerleave', () => { $('tip').style.display = 'none'; hoverRack = null })
+renderer.domElement.addEventListener('pointerdown', (ev) => { downAt = [ev.clientX, ev.clientY] })
+renderer.domElement.addEventListener('pointerup', (ev) => {
+  if (!downAt || Math.hypot(ev.clientX - downAt[0], ev.clientY - downAt[1]) > 5) return
+  const r = rackAt(ev)
+  if (r) { selected = r; flyToRack(r); renderInfo() }
+})
+controls.addEventListener('start', () => { fly = null })
+
+function resize() {
+  const r = host.getBoundingClientRect()
+  renderer.setSize(r.width, r.height, false); camera.aspect = r.width / Math.max(1, r.height); camera.updateProjectionMatrix()
+}
+addEventListener('resize', resize)
+
+// ---------- วนรอบ ----------
+let last = performance.now()
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now
+  if (fly) {
+    fly.t = Math.min(1, fly.t + dt / 1.4); const e = 1 - (1 - fly.t) ** 3
+    controls.target.lerpVectors(fly.fromT, fly.toT, e); camera.position.lerpVectors(fly.fromP, fly.toP, e)
+    if (fly.t >= 1) fly = null
+  }
+  // รถยกเดินตามเวลาจริงแม้เครื่องวาดภาพได้ช้า (ตัดช่วงละไม่เกิน 0.25 วินาที)
+  const simDt = Math.min(0.25, (now - (frame.prev || now)) / 1000); frame.prev = now
+  for (const f of forklifts) stepForklift(f, calm ? simDt * 3 : simDt)
+  for (const r of racks) if (r.glowT > 0) { r.glowT = Math.max(0, r.glowT - dt); r.glow.material.opacity = 0.28 * Math.min(1, r.glowT) * (0.6 + 0.4 * Math.sin(now / 90)) }
+  controls.update()
+  renderer.render(scene, camera)
+  requestAnimationFrame(frame)
+}
+
+// ---------- ข้อมูลสด ----------
+let lastSeq = null
+async function pollEvents() {
+  try {
+    const j = await getJSON('/v1/events' + (lastSeq === null ? '' : '?after=' + lastSeq))
+    if (lastSeq !== null && j.seq >= lastSeq) {
+      for (const e of j.events) {
+        if (e.type === 'in') {
+          const r = rackFor(e.brain, e.group), f = forklifts.find((x) => x.zone.brain === e.brain)
+          if (r && f && f.queue.length < 3) f.queue.push({ rack: r })
+          pushFeed('in', t('fIn', e.brain, r ? shelfName(r.shelf) : e.group || '-', num(e.n)), e.at)
+        } else if (e.type === 'out') {
+          const zr = racks.filter((r) => r.zone.brain === e.brain)
+          if (e.abstained) pushFeed('abstain', t('fAbs', e.brain), e.at)
+          else { pushFeed('out', t('fOut', e.brain, num(e.hits)), e.at); zr.slice(0, Math.max(1, Math.min(3, e.hits))).forEach((r) => flashRack(r, '#5fe0a8')) }
+        }
+      }
+    }
+    lastSeq = j.seq
+  } catch {}
+  setTimeout(pollEvents, 2000)
+}
+async function refresh(first) {
+  try {
+    const data = await loadWarehouse()
+    const shape = data.zones.map((z) => z.brain + ':' + z.shelves.map((s) => s.name + Math.min(BAYS_MAX, Math.ceil(Math.ceil(s.count / data.unit) / (LEVELS * PER_SLOT)))).join(',')).join('|') + '|' + data.unit
+    if (shape !== layoutKey) { wh = data; buildWorld(data); layoutKey = shape; if (first) flyTo(null) }
+    else { // โครงเดิม: อัปเดตตัวเลขและกล่อง โดยผูกชั้นเดิมกับข้อมูลใหม่
+      for (const r of racks) { const z = data.zones.find((x) => x.brain === r.zone.brain), s = z?.shelves.find((x) => x.name === r.shelf.name); if (z) { Object.assign(r.zone, { live: z.live, lastAt: z.lastAt, recent24: z.recent24 }) } if (s) r.shelf = s }
+      data.zones = wh.zones; data.bounds = wh.bounds; wh = data; fillBoxes(wh)
+    }
+    renderKpis(wh); renderInfo(); feedEmpty()
+    $('loading').style.display = 'none'
+    $('live').className = ''; $('live-text').textContent = t('live', new Date().toLocaleTimeString(loc(), { hour12: false }))
+  } catch (e) {
+    if (e.auth) { $('gate').style.display = 'grid'; $('err').textContent = key ? e.message : ''; return }
+    $('live').className = 'off'; $('live-text').textContent = t('offline')
+  }
+  setTimeout(() => refresh(false), 60000)
+}
+$('login').addEventListener('submit', (ev) => { ev.preventDefault(); key = $('key').value.trim(); sessionStorage.setItem('panya.key', key); $('gate').style.display = 'none'; refresh(true) })
+// สลับภาษา: สร้างป้ายในฉากใหม่จากข้อมูลเดิม ไม่ต้องโหลดใหม่
+$('lang').addEventListener('click', () => { lang = lang === 'th' ? 'en' : 'th'; try { localStorage.setItem('panya.lang', lang) } catch {}; applyLang(); if (wh) { buildWorld(wh); renderKpis(wh); renderInfo(); feedItems.length ? null : feedEmpty() } })
+$('spin').addEventListener('click', () => { controls.autoRotate = !controls.autoRotate; try { localStorage.setItem('panya.spin', controls.autoRotate ? '1' : '0') } catch {}; $('spin').setAttribute('aria-pressed', String(controls.autoRotate)); applyLang() })
+
+camera.position.set(-30, 30, -30); controls.target.set(0, 0, 10)
+applyLang(); resize(); requestAnimationFrame(frame)
+refresh(true); pollEvents()
+// ให้ตัวทดสอบอ่านสถานะได้
+window.__wh = { get data() { return wh }, get racks() { return racks }, get forklifts() { return forklifts }, controls, camera }
+</script>
+<script>
+// ปุ่มสลับโหมดสว่าง/มืด (ธีมเก็บใน localStorage panya.theme ใช้ร่วมกับทุกหน้า)
+(() => {
+  const lang = document.getElementById('lang'); if (!lang || !window.PanyaUI) return
+  const SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>'
+  const MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>'
+  const b = document.createElement('button'); b.type = 'button'; b.className = 'theme-btn'
+  const paint = () => {
+    const dark = PanyaUI.theme === 'dark', th = (document.documentElement.lang || 'th').startsWith('th')
+    b.innerHTML = dark ? SUN : MOON
+    const label = dark ? (th ? 'โหมดสว่าง' : 'Light mode') : (th ? 'โหมดมืด' : 'Dark mode')
+    b.setAttribute('aria-label', label); b.title = label
+  }
+  b.addEventListener('click', () => PanyaUI.setTheme(PanyaUI.theme === 'dark' ? 'light' : 'dark'))
+  lang.before(b); paint()
+  document.addEventListener('panya:theme', () => { paint(); window.dispatchEvent(new Event('resize')) })
+  new MutationObserver(paint).observe(document.documentElement, { attributes: true, attributeFilter: ['lang'] })
+})()
+</script>
+</body>
+</html>

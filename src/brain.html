@@ -2,83 +2,127 @@
 <html lang="th">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>panya · สมองที่สอง</title>
 <style>
   :root {
-    --bg: #071226; --bg2: #0d1f3d; --ink: #e8eef9; --muted: #93a4c2; --line: #1e3358;
-    --teal: #4fd1c5; --amber: #f6b352; --blue: #6aa9ff; --rose: #f08aa8; --violet: #a78bfa; --green: #7ddc8a;
+    --bg: #030814; --bg2: #0a1a38; --ink: #e8eef9; --ink2: #c3cfe6; --muted: #9db0d0; --line: rgba(110, 170, 255, .22);
+    --panel: rgba(8, 20, 44, .62); --field: rgba(6, 16, 36, .78);
+    --teal: #4fd1c5; --amber: #f6b352; --blue: #6aa9ff; --rose: #ff9db6; --cyan: #7fe3ff;
+    --r: 10px; --tap: 44px;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
   body {
-    background: radial-gradient(1200px 700px at 30% 20%, var(--bg2), var(--bg) 70%);
-    color: var(--ink); font-family: "Leelawadee UI", "Noto Sans Thai", Tahoma, system-ui, sans-serif;
+    background: radial-gradient(900px 620px at 38% 42%, var(--bg2), var(--bg) 72%);
+    color: var(--ink); font-family: "Leelawadee UI", "Noto Sans Thai", Sarabun, Tahoma, system-ui, sans-serif; line-height: 1.7;
     display: grid; grid-template-rows: auto 1fr; overflow: hidden;
   }
-  header { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--line); }
-  h1 { font-size: 18px; margin: 0; font-weight: 600; white-space: nowrap; }
+  header {
+    display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; padding: 12px 16px; padding-top: max(12px, env(safe-area-inset-top));
+    border-bottom: 1px solid var(--line); background: var(--panel); backdrop-filter: blur(10px); z-index: 2;
+  }
+  h1 { font-size: 18px; margin: 0; font-weight: 600; white-space: nowrap; letter-spacing: .02em; }
+  h1 b { color: var(--cyan); font-weight: 600; text-shadow: 0 0 14px rgba(127, 227, 255, .7); }
   h1 span { color: var(--muted); font-weight: 400; }
+  /* ข้อความไทยไม่ใช้ระยะห่างตัวอักษร: ทำให้สระและวรรณยุกต์เคลื่อน */
+  :lang(th) h1, :lang(th) aside h2 { letter-spacing: 0; }
+  /* แถบนำทางเหมือนกันทุกหน้า: หน้าปัจจุบันเป็นพื้นทึบ อีกหน้าเป็นเส้นขอบ */
+  .nav { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .nav a { display: inline-flex; align-items: center; min-height: var(--tap); padding: 0 14px; color: var(--ink); text-decoration: none; font-size: 14px; }
+  .nav a:hover { background: rgba(40, 104, 190, .35); }
+  .nav a[aria-current="page"] { background: rgba(57, 135, 229, .45); font-weight: 600; }
+  .nav a:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; }
   form { display: flex; gap: 8px; flex: 1 1 320px; min-width: 0; }
   input, button {
-    font: inherit; color: var(--ink); background: #0b1a33; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; min-width: 0;
+    font: inherit; color: var(--ink); background: var(--field); border: 1px solid var(--line); border-radius: var(--r);
+    padding: 8px 14px; min-width: 0; min-height: var(--tap);
   }
-  input:focus, button:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
+  input::placeholder { color: #7f93b6; }
+  input:focus, button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 1px; }
   #q { flex: 1 1 auto; }
-  button { cursor: pointer; background: #12305a; }
-  button:hover { background: #18407a; }
-  #stats { color: var(--muted); font-size: 13px; white-space: nowrap; }
+  button { cursor: pointer; background: rgba(28, 74, 140, .55); white-space: nowrap; transition: background .15s, box-shadow .15s; }
+  button:hover { background: rgba(40, 104, 190, .7); box-shadow: 0 0 16px rgba(106, 169, 255, .35); }
+  button:disabled { opacity: .6; cursor: progress; }
+  button.primary { background: linear-gradient(180deg, rgb(34, 104, 190), rgb(24, 78, 152)); border-color: rgba(127, 227, 255, .5); }
+  /* จำนวนความจำอยู่บนเวทีเดียวกับสมอง ไม่กินแถวของหัวหน้าบนมือถือ */
+  #stats { position: absolute; left: 14px; top: 10px; right: 14px; pointer-events: none; color: var(--ink2); font-size: 13px; font-variant-numeric: tabular-nums; }
   main { display: grid; grid-template-columns: 1fr 340px; min-height: 0; }
-  #stage { position: relative; min-height: 0; }
-  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-  aside { border-left: 1px solid var(--line); padding: 14px 16px; overflow: auto; background: rgba(7, 18, 38, .6); }
-  aside h2 { font-size: 13px; color: var(--muted); font-weight: 600; margin: 0 0 10px; }
-  .hit { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; cursor: pointer; background: #0b1a33; }
-  .hit:hover, .hit.on { border-color: var(--amber); }
-  .hit p { margin: 0 0 6px; line-height: 1.55; font-size: 14px; overflow-wrap: anywhere; }
+  #stage { position: relative; min-height: 0; overflow: hidden; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+  canvas.dragging { cursor: grabbing; }
+  canvas.pointing { cursor: pointer; }
+  aside { border-left: 1px solid var(--line); padding: 14px 16px; overflow: auto; background: var(--panel); backdrop-filter: blur(10px); }
+  aside h2 { font-size: 13px; color: var(--muted); font-weight: 600; margin: 0 0 10px; letter-spacing: .04em; }
+  .hit { border: 1px solid var(--line); border-radius: var(--r); padding: 10px 12px; margin-bottom: 8px; cursor: pointer; background: var(--field); transition: border-color .15s, box-shadow .15s; }
+  .hit:hover, .hit.on { border-color: var(--amber); box-shadow: 0 0 14px rgba(246, 179, 82, .25); }
+  .hit p { margin: 0 0 6px; font-size: 14px; overflow-wrap: anywhere; }
   .hit small { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
-  .empty { color: var(--muted); font-size: 14px; line-height: 1.6; }
+  .empty { color: var(--muted); font-size: 14px; }
   .legend { display: flex; flex-wrap: wrap; gap: 6px 12px; margin: 14px 0 0; font-size: 12px; color: var(--muted); }
-  .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: 0; }
+  .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; box-shadow: 0 0 8px currentColor; }
   #tip {
-    position: absolute; pointer-events: none; max-width: 340px; background: #0b1a33; border: 1px solid var(--line); border-radius: 10px;
-    padding: 9px 11px; font-size: 13px; line-height: 1.5; display: none; box-shadow: 0 8px 24px rgba(0, 0, 0, .45); overflow-wrap: anywhere;
+    position: absolute; pointer-events: none; max-width: 340px; background: rgba(6, 16, 36, .94); border: 1px solid rgba(127, 227, 255, .45); border-radius: var(--r);
+    padding: 9px 11px; font-size: 13px; display: none; box-shadow: 0 8px 28px rgba(0, 0, 0, .55), 0 0 18px rgba(106, 169, 255, .25); overflow-wrap: anywhere;
   }
   #tip small { color: var(--muted); display: block; margin-top: 4px; }
-  #gate { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(7, 18, 38, .88); }
-  #gate form { flex-direction: column; flex: none; width: min(360px, 86vw); }
-  #gate p { margin: 0 0 4px; color: var(--muted); font-size: 14px; line-height: 1.6; }
-  @media (max-width: 820px) { main { grid-template-columns: 1fr; grid-template-rows: 58vh auto; } aside { border-left: 0; border-top: 1px solid var(--line); } body { overflow: auto; } }
+  #hud .grow { flex: 1 1 auto; }
+  /* มือถือ: แถวแรกเป็นชื่อ แถบนำทาง และปุ่มภาษา แถวที่สองเป็นช่องค้นเต็มความกว้าง */
+  @media (max-width: 820px) { h1 span { display: none; } header { gap: 8px; padding: 8px 12px; } #search { order: 9; flex-basis: 100%; } #lang { margin-left: auto; } }
+  #hud { position: absolute; left: 14px; right: 14px; bottom: 12px; display: flex; gap: 10px; align-items: center; font-size: 12px; color: var(--muted); pointer-events: none; }
+  #hud button { pointer-events: auto; font-size: 12px; padding: 4px 12px; min-height: var(--tap); }
+  #gate { position: absolute; inset: 0; display: grid; place-items: center; background: radial-gradient(closest-side, rgba(3, 8, 20, .35), rgba(3, 8, 20, .78)); padding: 16px; }
+  #gate form {
+    flex-direction: column; flex: none; width: min(380px, 100%); padding: 20px; border: 1px solid rgba(127, 227, 255, .35); border-radius: 16px;
+    background: rgba(6, 16, 36, .72); backdrop-filter: blur(14px); box-shadow: 0 0 60px rgba(60, 140, 255, .22);
+  }
+  #gate p { margin: 0 0 4px; color: var(--muted); font-size: 14px; }
+  #err { color: var(--rose) !important; min-height: 1.7em; }
+  @media (max-width: 820px) {
+    main { grid-template-columns: 1fr; grid-template-rows: 60vh auto; }
+    aside { border-left: 0; border-top: 1px solid var(--line); padding-bottom: max(14px, env(safe-area-inset-bottom)); }
+    body { overflow: auto; }
+    #hud span { display: none; }
+  }
 </style>
+<link rel="stylesheet" href="/assets/legacy-light.css?v=1">
+<script src="/assets/ui.js?v=1"></script>
 </head>
 <body>
 <header>
-  <h1>panya <span>· สมองที่สอง</span></h1>
+  <h1><b>panya</b> <span data-i18n="subtitle"></span></h1>
+  <nav class="nav" data-i18n-aria="navAria"><a href="/brain" aria-current="page" data-i18n="navBrain"></a><a href="/dashboard" data-i18n="dashboard"></a><a href="/warehouse" data-i18n="navWh"></a></nav>
   <form id="search">
-    <input id="q" placeholder="ถามความจำ เช่น ท่าไหนปิดซ่อม" autocomplete="off">
-    <button>ค้น</button>
+    <input id="q" data-i18n-ph="qPh" data-i18n-aria="qAria" autocomplete="off">
+    <button class="primary" id="go" data-i18n="go"></button>
   </form>
-  <div id="stats"></div>
-  <button id="export" type="button" hidden>ส่งออก</button>
-  <button id="logout" type="button" hidden>ออกจากระบบ</button>
+  <button id="lang" type="button"></button>
 </header>
 <main>
   <div id="stage">
-    <canvas id="c"></canvas>
+    <canvas id="c" data-i18n-aria="canvasAria"></canvas>
+    <div id="stats" role="status"></div>
     <div id="tip"></div>
+    <div id="hud">
+      <button id="spin" type="button" aria-pressed="true"></button>
+      <span data-i18n="hint"></span>
+      <i class="grow"></i>
+      <button id="export" type="button" data-i18n="export" hidden></button>
+      <button id="logout" type="button" data-i18n="signOut" hidden></button>
+    </div>
     <div id="gate">
       <form id="login">
-        <p>เข้าสู่ระบบด้วยชื่อสมอง (brain) และ API key ของสมองนั้น ทั้งสองค่าจะถูกจำไว้ในแท็บนี้เท่านั้น</p>
-        <input id="container" placeholder="ชื่อสมอง (brain)" autocomplete="username" required>
-        <input id="key" type="password" placeholder="API key" autocomplete="current-password" required>
-        <button>เข้าสู่ระบบ</button>
-        <p id="err" style="color: var(--rose)"></p>
+        <p data-i18n="gateHelp"></p>
+        <input id="container" data-i18n-ph="brainPh" data-i18n-aria="brainPh" autocomplete="username" required>
+        <input id="key" type="password" placeholder="API key" autocomplete="current-password" aria-label="API key" required>
+        <button class="primary" id="enter" data-i18n="signIn"></button>
+        <p id="err" role="alert"></p>
       </form>
     </div>
   </div>
   <aside>
-    <h2 id="side-title">ผลการค้น</h2>
-    <div id="hits"><p class="empty">พิมพ์คำถามด้านบน จุดที่เกี่ยวข้องจะสว่างขึ้นบนสมอง ชี้ที่จุดใดก็ได้เพื่ออ่านความจำนั้น</p></div>
+    <h2 id="side-title"></h2>
+    <div id="hits" aria-live="polite"></div>
     <div class="legend" id="legend"></div>
   </aside>
 </main>
@@ -86,25 +130,377 @@
 const $ = (id) => document.getElementById(id)
 const canvas = $('c'), ctx = canvas.getContext('2d')
 const PALETTE = ['#4fd1c5', '#f6b352', '#6aa9ff', '#f08aa8', '#a78bfa', '#7ddc8a', '#ffd166', '#5eead4', '#fca5a5', '#93c5fd']
-// โครงสมองมองจากด้านข้าง หันหน้าไปทางซ้าย ในกรอบ 1000 x 760
-const BRAIN = new Path2D('M150 420 C90 330 130 190 260 130 C330 60 470 40 560 70 C660 40 800 90 850 190 C930 250 950 380 880 450 C900 520 850 590 760 590 C720 600 680 590 650 560 C640 640 620 700 600 740 L540 740 C550 680 545 620 520 570 C440 600 330 590 270 540 C200 530 150 480 150 420 Z')
-const FOLDS = [
-  'M260 130 C300 210 250 300 330 360', 'M420 70 C400 170 480 230 440 330', 'M560 70 C600 160 540 250 610 320',
-  'M720 100 C700 200 780 260 740 360', 'M850 190 C790 250 830 330 780 420', 'M180 380 C280 400 360 450 470 430',
-  'M470 430 C560 410 640 460 760 440', 'M300 500 C380 470 450 520 520 500', 'M700 520 C740 500 790 540 830 510',
-].map((d) => new Path2D(d))
+const AMBER = '#f6b352', TAU = Math.PI * 2
+const calm = matchMedia('(prefers-reduced-motion: reduce)').matches
 
-let nodes = [], edges = [], neighbors = [], groups = [], lit = new Map(), hover = -1, pinned = -1, view = { s: 1, ox: 0, oy: 0 }, t0 = performance.now()
+// ---------- สองภาษา ----------
+// ภาษาที่เลือกจำไว้ในเบราว์เซอร์และใช้ร่วมกับหน้า /dashboard · ค่าเป็นข้อความ หรือฟังก์ชันเมื่อมีตัวเลขแทรก
+const L = {
+  th: {
+    title: 'panya · สมองที่สอง', subtitle: '· สมองที่สอง', other: 'EN', otherAria: 'Switch to English', navAria: 'หน้าหลัก', navWh: 'คลังสินค้า', navBrain: 'สมอง',
+    qPh: 'ถามความจำ เช่น ท่าไหนปิดซ่อม', qAria: 'คำถาม', go: 'ค้น', searching: 'กำลังค้น…', dashboard: 'แดชบอร์ด', export: 'ส่งออก', exporting: 'กำลังส่งออก…',
+    signOut: 'ออกจากระบบ', signIn: 'เข้าสู่ระบบ', signingIn: 'กำลังเข้าสู่ระบบ…', brainPh: 'ชื่อสมอง (brain)',
+    canvasAria: 'ภาพสมองสามมิติ แต่ละจุดคือความจำหนึ่งรายการ', spinStop: 'หยุดหมุน', spinGo: 'หมุนต่อ', hint: 'ลากเพื่อหมุน · ล้อเมาส์เพื่อซูม · แตะจุดเพื่ออ่านความจำ',
+    gateHelp: 'เข้าสู่ระบบด้วยชื่อสมอง (brain) และ API key ของสมองนั้น ทั้งสองค่าจะถูกจำไว้ในแท็บนี้เท่านั้น',
+    results: 'ผลการค้น', resultsN: (n) => `ผลการค้น ${n} รายการ`, near: 'ความจำนี้และที่ใกล้เคียง', score: 'คะแนน',
+    intro: 'พิมพ์คำถามด้านบน จุดที่เกี่ยวข้องจะสว่างขึ้นบนสมอง ชี้ที่จุดใดก็ได้เพื่ออ่านความจำนั้น', typeAbove: 'พิมพ์คำถามด้านบน',
+    whyUnknown: 'ไม่ตอบ: คำถามนี้ถามถึงรายที่ไม่เคยปรากฏในความจำ', whyNoMatch: 'ไม่มีความจำที่เกี่ยวข้องพอ สมองเลือกตอบว่าไม่รู้',
+    emptyBrain: 'สมองนี้ยังไม่มีความจำ เก็บความจำแรกด้วย POST /v1/memories แล้วโหลดหน้านี้ใหม่',
+    stats: (n, e, b) => `${n} ความจำ · ${e} เส้นเชื่อม · ${b}`, badKey: 'API key ไม่ถูกต้อง', wrongBrain: 'key นี้ใช้กับสมองนี้ไม่ได้', serverSays: (n) => `เซิร์ฟเวอร์ตอบ ${n}`, raw: (m) => m,
+  },
+  en: {
+    title: 'panya · Second Brain', subtitle: '· Second Brain', other: 'ไทย', otherAria: 'เปลี่ยนเป็นภาษาไทย', navAria: 'Main pages', navWh: 'Warehouse', navBrain: 'Brain',
+    qPh: 'Ask the memory, e.g. which dock is closed', qAria: 'Question', go: 'Search', searching: 'Searching…', dashboard: 'Dashboard', export: 'Export', exporting: 'Exporting…',
+    signOut: 'Sign out', signIn: 'Sign in', signingIn: 'Signing in…', brainPh: 'Brain name',
+    canvasAria: '3D brain. Each point is one memory.', spinStop: 'Stop rotation', spinGo: 'Rotate', hint: 'Drag to rotate · scroll to zoom · tap a point to read the memory',
+    gateHelp: 'Sign in with a brain name and that brain’s API key. Both are remembered in this tab only.',
+    results: 'Search results', resultsN: (n) => `${n} search results`, near: 'This memory and its neighbours', score: 'Score',
+    intro: 'Type a question above. Matching points light up on the brain. Point at any dot to read that memory.', typeAbove: 'Type a question above',
+    whyUnknown: 'No answer: the question names something that never appears in this brain', whyNoMatch: 'No memory was relevant enough, so the brain chose to say it does not know',
+    emptyBrain: 'This brain has no memories yet. Store the first one with POST /v1/memories, then reload this page.',
+    stats: (n, e, b) => `${n} memories · ${e} links · ${b}`, badKey: 'That API key is not valid', wrongBrain: 'This key does not work for this brain', serverSays: (n) => `Server responded ${n}`, raw: (m) => m,
+  },
+}
+let lang = localStorage.getItem('panya.lang') || ((navigator.language || 'th').toLowerCase().startsWith('th') ? 'th' : 'en')
+const t = (k, ...a) => { const v = L[lang][k]; return typeof v === 'function' ? v(...a) : v }
+const loc = () => (lang === 'th' ? 'th-TH' : 'en-GB')
+
+let nodes = [], edges = [], neighbors = [], groups = [], lit = new Map(), litIdx = [], hover = -1, pinned = -1
 const cfg = { container: sessionStorage.getItem('panya.container') || new URLSearchParams(location.search).get('brain') || '', key: sessionStorage.getItem('panya.key') || '' }
 
+// ---------- รูปสมองสามมิติ: กลุ่มจุดบนผิว สร้างจากสูตร ไม่ใช้ไฟล์โมเดล ----------
+// แกน: x = ซ้าย-ขวา, y = บน-ล่าง, z = หน้า-หลัง (หน้า = บวก)
+const rng = (seed) => () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296 }
+// ลายรอยหยัก: เส้นที่ค่าใกล้ศูนย์ลากคดเคี้ยวไปทั่วผิว
+const fold = (x, y, z) => Math.sin(x * 8 + 2 * Math.sin(z * 5 + y * 4)) + Math.sin(y * 8 + 2 * Math.sin(x * 6 + z * 3)) + Math.sin(z * 7 + 2 * Math.sin(y * 5 + x * 4))
+
+const shell = (() => {
+  const r = rng(7), P = []
+  // สุ่มทิศบนทรงกลมแบบสม่ำเสมอ (ไม่ใช้ตารางเกลียว เพราะจะเห็นเป็นวงซ้อนแทนรอยหยัก)
+  const ball = (n, fn) => { for (let i = 0; i < n; i++) { const y = r() * 2 - 1, q = Math.sqrt(1 - y * y), a = r() * TAU; fn(Math.cos(a) * q, y, Math.sin(a) * q) } }
+  const keep = (x, y, z, isFold) => { if (isFold) P.push(x * 0.985, y * 0.985, z * 0.985, 0.85); else if (r() < 0.1) P.push(x, y, z, 0.3) }
+  for (const s of [-1, 1]) {
+    // ซีกสมองใหญ่: ด้านในแบน ด้านล่างแบน ท้ายทอยสูงกว่าหน้าผาก ปลายหน้าเรียว
+    ball(15000, (dx, dy, dz) => {
+      let x = s * 0.37 + dx * 0.41, y = dy * 0.68 + 0.05, z = dz
+      if (x * s < 0.035) { if (r() > 0.14) return; x = s * 0.035 }
+      const zf = Math.max(0, z), zb = Math.max(0, -z)
+      if (y > 0) y *= 1 + 0.1 * zb - 0.06 * zf
+      if (y < -0.3) y = -0.3 + (y + 0.3) * 0.5
+      if (y < 0 && z > 0.3) y *= 1 - 0.35 * (z - 0.3)
+      x = s * 0.035 + (x - s * 0.035) * (1 - 0.22 * zf * zf - 0.1 * zb * zb)
+      keep(x, y, z, Math.abs(fold(x, y, z)) < 0.3)
+    })
+    // กลีบขมับ
+    ball(2400, (dx, dy, dz) => {
+      const x = s * 0.55 + dx * 0.2, y = -0.34 + dy * 0.2, z = 0.2 + dz * 0.5
+      if (y > -0.26 && Math.abs(x) < 0.62) return
+      keep(x, y, z, Math.abs(fold(x, y, z)) < 0.3)
+    })
+  }
+  const cortex = P.length / 4
+  // สมองน้อย: ลายเป็นริ้วแนวนอน
+  ball(4200, (dx, dy, dz) => {
+    const x = dx * 0.46, y = -0.48 + dy * 0.25, z = -0.66 + dz * 0.3
+    keep(x, y, z, Math.abs(Math.sin(y * 44 + z * 10)) < 0.3)
+  })
+  // ก้านสมอง
+  for (let i = 0; i < 380; i++) { const t = r(), a = r() * TAU, rad = 0.11 - 0.04 * t; P.push(Math.cos(a) * rad, -0.45 - t * 0.62, -0.36 - t * 0.1 + Math.sin(a) * rad, 0.4) }
+  // ฝุ่นแสงรอบ ๆ
+  for (let i = 0; i < 220; i++) { const a = r() * TAU, u = r() * 2 - 1, q = Math.sqrt(1 - u * u), d = 1.35 + r() * 0.9; P.push(Math.cos(a) * q * d, u * d * 0.8, Math.sin(a) * q * d, 0.22) }
+  return { p: new Float32Array(P), n: P.length / 4, cortex }
+})()
+
+// ---------- กล้อง ----------
+const cam = { yaw: 0.7, pitch: -0.2, zoom: 1, spin: true }
+let W = 1, H = 1, dpr = 1, cx = 0, cy = 0, S = 1, cyaw = 1, syaw = 0, cpit = 1, spit = 0
+const DIST = 3.4
+const out = { x: 0, y: 0, p: 1, z: 0 }
+function proj(x, y, z) {
+  const x1 = x * cyaw + z * syaw, z1 = -x * syaw + z * cyaw
+  const y1 = y * cpit - z1 * spit, z2 = y * spit + z1 * cpit
+  const p = DIST / (DIST - z2)
+  out.x = cx + x1 * S * p; out.y = cy - y1 * S * p; out.p = p; out.z = z2
+  return out
+}
+const fogOf = (z) => Math.max(0.16, Math.min(1, 0.3 + 0.7 * ((z + 1.1) / 2.2)))
+
+function resize() {
+  const r = canvas.getBoundingClientRect()
+  dpr = Math.min(2, window.devicePixelRatio || 1); W = r.width; H = r.height
+  canvas.width = Math.max(1, W * dpr); canvas.height = Math.max(1, H * dpr)
+}
+
+// ---------- วางความจำลงในเนื้อสมอง ----------
+// แกน PCA ที่หนึ่ง = หน้า-หลัง, ที่สอง = บน-ล่าง, ซีกซ้าย/ขวาและความลึกมาจากค่าแฮชของลำดับ
+const hash = (i, k) => (((Math.sin(i * 12.9898 + k * 78.233) * 43758.5453) % 1) + 1) % 1
+function layout() {
+  const n = nodes.length, idx = nodes.map((_, i) => i)
+  const rank = (key) => { const m = new Float32Array(n); idx.slice().sort((a, b) => nodes[a][key] - nodes[b][key]).forEach((id, r) => { m[id] = (r + 0.5) / n }); return m }
+  const rx = rank('x'), ry = rank('y')
+  nodes.forEach((nd, i) => {
+    const u = rx[i] * 2 - 1, v = ry[i] * 2 - 1
+    const z = u * Math.sqrt(1 - (v * v) / 2) * 0.9, yy = v * Math.sqrt(1 - (u * u) / 2) * 0.6
+    const half = 0.74 * Math.sqrt(Math.max(0.02, 1 - (yy / 0.68) ** 2 - z * z))
+    nd.X = (hash(i, 1) < 0.5 ? -1 : 1) * (0.05 + Math.pow(hash(i, 2), 0.7) * Math.max(0.02, half - 0.07))
+    nd.Y = yy + 0.05; nd.Z = z
+    nd.sx = 0; nd.sy = 0; nd.sp = 1; nd.fog = 1
+  })
+}
+
+// ---------- แสงและไฟฟ้า ----------
+const sprites = new Map()
+function sprite(hex) {
+  let c = sprites.get(hex)
+  if (c) return c
+  c = document.createElement('canvas'); c.width = c.height = 64
+  const g = c.getContext('2d'), gr = g.createRadialGradient(32, 32, 0, 32, 32, 32)
+  gr.addColorStop(0, '#ffffff'); gr.addColorStop(0.16, hex); gr.addColorStop(0.42, hex + '55'); gr.addColorStop(1, hex + '00')
+  g.fillStyle = gr; g.fillRect(0, 0, 64, 64)
+  sprites.set(hex, c)
+  return c
+}
+const glow = (hex, x, y, r) => ctx.drawImage(sprite(hex), x - r, y - r, r * 2, r * 2)
+
+// สายฟ้า: เส้นหักจากการแบ่งครึ่งซ้ำ ๆ ในพิกัดของสมอง จึงหมุนตามสมองไปด้วย
+const zr = rng(99)
+function bolt(a, b) {
+  let pts = [a, b], amp = Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) * 0.2
+  for (let it = 0; it < 4; it++) {
+    const next = [pts[0]]
+    for (let i = 1; i < pts.length; i++) {
+      const p = pts[i - 1], q = pts[i]
+      next.push([(p[0] + q[0]) / 2 + (zr() - 0.5) * amp, (p[1] + q[1]) / 2 + (zr() - 0.5) * amp, (p[2] + q[2]) / 2 + (zr() - 0.5) * amp], q)
+    }
+    pts = next; amp *= 0.55
+  }
+  return pts
+}
+const shellPoint = (i) => [shell.p[i * 4] * 1.03, shell.p[i * 4 + 1] * 1.03, shell.p[i * 4 + 2] * 1.03]
+let arcs = [], pulses = [], nextArc = 0, nextLitArc = 0, nextSurge = 2.5, surge = 0
+function spawnArc(t, a, b, color) {
+  if (!a) {
+    a = shellPoint(Math.floor(zr() * shell.cortex))
+    for (let tries = 0; tries < 12; tries++) {
+      b = shellPoint(Math.floor(zr() * shell.cortex))
+      const d = Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
+      if (d > 0.22 && d < 0.75) break
+    }
+  }
+  arcs.push({ a, b, born: t, life: 0.14 + zr() * 0.26, jit: 0, pts: null, color: color || null, fork: zr() < 0.4 ? null : false })
+}
+function drawArc(arc, t) {
+  const age = (t - arc.born) / arc.life
+  if (t >= arc.jit) {
+    arc.pts = bolt(arc.a, arc.b); arc.jit = t + 0.045
+    if (arc.fork !== false) { const m = arc.pts[4 + Math.floor(zr() * 8)]; arc.fork = bolt(m, [m[0] + (zr() - 0.5) * 0.4, m[1] + (zr() - 0.5) * 0.4, m[2] + (zr() - 0.5) * 0.4]) }
+  }
+  const a = (1 - age) * (zr() < 0.25 ? 0.35 : 1)
+  for (const pts of arc.fork ? [arc.pts, arc.fork] : [arc.pts]) {
+    ctx.beginPath()
+    let f = 1
+    pts.forEach((p, i) => { const o = proj(p[0], p[1], p[2]); if (i) ctx.lineTo(o.x, o.y); else { ctx.moveTo(o.x, o.y); f = fogOf(o.z) } })
+    ctx.strokeStyle = arc.color ? `rgba(246, 179, 82, ${0.22 * a * f})` : `rgba(90, 170, 255, ${0.22 * a * f})`
+    ctx.lineWidth = pts === arc.pts ? 4.5 : 3; ctx.stroke()
+    ctx.strokeStyle = arc.color ? `rgba(255, 236, 200, ${0.95 * a * f})` : `rgba(226, 250, 255, ${0.95 * a * f})`
+    ctx.lineWidth = pts === arc.pts ? 1.15 : 0.8; ctx.stroke()
+  }
+  for (const e of [arc.a, arc.b]) { const o = proj(e[0], e[1], e[2]); ctx.globalAlpha = a * fogOf(o.z); glow(arc.color || '#7fe3ff', o.x, o.y, 9 * o.p) }
+  ctx.globalAlpha = 1
+}
+
+// ---------- วาดหนึ่งเฟรม ----------
+const NB = 8
+const buf = Array.from({ length: NB * 2 }, () => new Float32Array(shell.n * 3)), cnt = new Int32Array(NB * 2)
+const hot = [[0, 0, 0], [0, 0, 0], [0, 0, 0]]
+let last = performance.now(), T = 0
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now; T += dt
+  const t = T, focus = pinned >= 0 ? pinned : hover, searching = lit.size > 0
+  // หมุนช้า ๆ ตลอด · ชี้จุดความจำ = ชะลอให้อ่านทัน ไม่หยุด (จุดหนาแน่นจนเมาส์โดนจุดเกือบตลอด)
+  if (cam.spin && !drag.on) cam.yaw += dt * 0.12 * (hover >= 0 ? 0.3 : 1)
+  cyaw = Math.cos(cam.yaw); syaw = Math.sin(cam.yaw); cpit = Math.cos(cam.pitch); spit = Math.sin(cam.pitch)
+  cx = W / 2; cy = H * 0.45; S = Math.min(W, H) * 0.37 * cam.zoom
+
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.globalCompositeOperation = 'source-over'
+  ctx.clearRect(0, 0, W, H)
+  ctx.globalCompositeOperation = 'lighter'
+
+  // แท่นฉายโฮโลแกรมใต้สมอง
+  const base = proj(0, -1.12, 0), tilt = Math.max(0.08, Math.abs(spit) + 0.1)
+  ;[[1.05, 0.5, [2, 10], 14], [0.82, 0.32, [22, 8], -9], [0.5, 0.2, [1, 5], 20]].forEach(([rad, al, dash, speed]) => {
+    ctx.beginPath(); ctx.ellipse(base.x, base.y, rad * S * base.p, rad * S * base.p * tilt, 0, 0, TAU)
+    ctx.setLineDash(dash); ctx.lineDashOffset = calm ? 0 : t * speed
+    ctx.strokeStyle = `rgba(100, 190, 255, ${al})`; ctx.lineWidth = 1.2; ctx.stroke()
+  })
+  ctx.setLineDash([])
+  const beam = ctx.createLinearGradient(0, base.y, 0, base.y - S * 0.9)
+  beam.addColorStop(0, 'rgba(80, 170, 255, .09)'); beam.addColorStop(1, 'rgba(80, 170, 255, 0)')
+  ctx.fillStyle = beam; ctx.beginPath(); ctx.moveTo(base.x - S * 0.8, base.y); ctx.lineTo(base.x + S * 0.8, base.y); ctx.lineTo(base.x + S * 1.0, base.y - S * 0.9); ctx.lineTo(base.x - S * 1.0, base.y - S * 0.9); ctx.fill()
+
+  // จังหวะไฟ: กระพริบพื้นฐาน, คลื่นกระตุ้นสามจุดที่วิ่งไปบนผิว, แถบสแกนแนวนอน, และไฟกระชากเป็นช่วง ๆ
+  if (!calm && t > nextSurge) { surge = 1; nextSurge = t + 3 + zr() * 4; for (let i = 0; i < 7; i++) spawnArc(t) }
+  surge *= Math.exp(-dt * 5)
+  const flick = (calm ? 1 : 0.86 + 0.14 * Math.sin(t * 23) * Math.sin(t * 7.3)) + surge * 0.6
+  hot.forEach((h, k) => { h[0] = Math.sin(t * (0.43 + k * 0.17) + k * 2.1) * 0.7; h[1] = Math.sin(t * (0.61 + k * 0.11) + k * 4.2) * 0.55; h[2] = Math.cos(t * (0.37 + k * 0.13) + k) * 0.9 })
+  const scanY = calm ? 9 : ((t * 0.28) % 1) * 2.2 - 1.1
+
+  // เปลือกสมอง: จัดจุดลงถังตามความสว่าง แล้วระบายทีละถัง
+  cnt.fill(0)
+  const sp = shell.p
+  for (let i = 0, j = 0; i < shell.n; i++, j += 4) {
+    const x = sp[j], y = sp[j + 1], z = sp[j + 2]
+    const x1 = x * cyaw + z * syaw, z1 = -x * syaw + z * cyaw
+    const y1 = y * cpit - z1 * spit, z2 = y * spit + z1 * cpit
+    const p = DIST / (DIST - z2), fog = fogOf(z2)
+    let boost = 0
+    for (let k = 0; k < 3; k++) { const h = hot[k], dx = x - h[0], dy = y - h[1], dz = z - h[2], d2 = dx * dx + dy * dy + dz * dz; if (d2 < 0.3) boost += Math.exp(-d2 * 16) }
+    const ds = y - scanY
+    if (ds * ds < 0.0008) boost += 0.55
+    const al = sp[j + 3] * fog * flick * (searching ? 0.6 : 1) + boost * fog * 0.85
+    const b = Math.min(NB - 1, Math.floor(al * NB)) + (boost > 0.3 ? NB : 0)
+    const o = buf[b], c = cnt[b]++ * 3
+    o[c] = cx + x1 * S * p; o[c + 1] = cy - y1 * S * p; o[c + 2] = (sp[j + 3] > 0.5 ? 1.7 : 1.25) * p * (boost > 0.3 ? 1.35 : 1)
+  }
+  for (let b = 0; b < NB * 2; b++) {
+    if (!cnt[b]) continue
+    ctx.fillStyle = b < NB ? `rgba(78, 160, 255, ${((b + 1) / NB) * 0.82})` : `rgba(186, 244, 255, ${((b - NB + 1) / NB) * 0.95})`
+    ctx.beginPath()
+    const o = buf[b]
+    for (let c = 0, e = cnt[b] * 3; c < e; c += 3) { const s = o[c + 2]; ctx.rect(o[c] - s / 2, o[c + 1] - s / 2, s, s) }
+    ctx.fill()
+  }
+
+  // ความจำและเส้นเชื่อม
+  for (const n of nodes) { const o = proj(n.X, n.Y, n.Z); n.sx = o.x; n.sy = o.y; n.sp = o.p; n.fog = fogOf(o.z) }
+  if (edges.length) {
+    ctx.lineWidth = 0.7; ctx.strokeStyle = `rgba(110, 165, 255, ${searching ? 0.05 : 0.13})`; ctx.beginPath()
+    for (const [a, b] of edges) { ctx.moveTo(nodes[a].sx, nodes[a].sy); ctx.lineTo(nodes[b].sx, nodes[b].sy) }
+    ctx.stroke()
+    ctx.lineWidth = 1.3; ctx.strokeStyle = 'rgba(246, 179, 82, .8)'; ctx.beginPath()
+    for (const [a, b] of edges) if ((lit.has(a) && lit.has(b)) || a === focus || b === focus) { ctx.moveTo(nodes[a].sx, nodes[a].sy); ctx.lineTo(nodes[b].sx, nodes[b].sy) }
+    ctx.stroke()
+
+    // สัญญาณประสาทวิ่งไปตามเส้นเชื่อม
+    const want = calm ? 0 : Math.min(70, Math.ceil(edges.length / 18))
+    while (pulses.length < want) pulses.push({ e: Math.floor(zr() * edges.length), u: 0, v: 0.6 + zr() * 1.4, rev: zr() < 0.5 })
+    ctx.lineWidth = 1.4
+    pulses = pulses.filter((pl) => {
+      pl.u += dt * pl.v
+      const ed = edges[pl.e]
+      if (pl.u >= 1 || !ed) return false
+      const A = nodes[pl.rev ? ed[1] : ed[0]], B = nodes[pl.rev ? ed[0] : ed[1]], u0 = Math.max(0, pl.u - 0.18)
+      const x = A.sx + (B.sx - A.sx) * pl.u, y = A.sy + (B.sy - A.sy) * pl.u, f = (A.fog + B.fog) / 2
+      ctx.strokeStyle = `rgba(190, 240, 255, ${0.7 * f})`
+      ctx.beginPath(); ctx.moveTo(A.sx + (B.sx - A.sx) * u0, A.sy + (B.sy - A.sy) * u0); ctx.lineTo(x, y); ctx.stroke()
+      ctx.globalAlpha = f; glow('#7fe3ff', x, y, 5 * A.sp); ctx.globalAlpha = 1
+      return true
+    })
+  }
+  const near = focus >= 0 ? neighbors[focus] : null, unit = Math.max(0.75, S / 300)
+  nodes.forEach((n, i) => {
+    const score = lit.get(i), isLit = score !== undefined, isFocus = i === focus
+    const r0 = 2.2 + Math.min(3, Math.log2(1 + n.count))
+    const r = (isLit ? (r0 + 2.5 + score * 4) * (calm ? 1 : 1 + 0.25 * Math.sin(t * 5 + i)) : isFocus ? r0 + 3 : r0) * n.sp * unit
+    ctx.globalAlpha = (searching && !isLit && !isFocus && !(near && near.includes(i)) ? 0.2 : 1) * (isLit || isFocus ? 1 : n.fog)
+    glow(isLit ? AMBER : n.color, n.sx, n.sy, r * 3.2)
+  })
+  ctx.globalAlpha = 1
+  if (pinned >= 0 && nodes[pinned]) {
+    const n = nodes[pinned]
+    ctx.strokeStyle = 'rgba(255, 236, 200, .9)'; ctx.lineWidth = 1.2; ctx.setLineDash([4, 4]); ctx.lineDashOffset = -t * 12
+    ctx.beginPath(); ctx.arc(n.sx, n.sy, 13 * n.sp * unit, 0, TAU); ctx.stroke(); ctx.setLineDash([])
+  }
+
+  // สายฟ้า: บนผิวตลอดเวลา และระหว่างความจำที่ตรงกับคำค้น
+  if (t > nextArc) { spawnArc(t); nextArc = t + (calm ? 1.2 : 0.05 + zr() * 0.2) }
+  if (litIdx.length && t > nextLitArc) {
+    const a = nodes[litIdx[Math.floor(zr() * litIdx.length)]]
+    const others = litIdx.length > 1 ? litIdx : neighbors[litIdx[0]] || []
+    const b = nodes[others[Math.floor(zr() * others.length)]]
+    if (a && b && a !== b) spawnArc(t, [a.X, a.Y, a.Z], [b.X, b.Y, b.Z], AMBER)
+    nextLitArc = t + (calm ? 1.5 : 0.18 + zr() * 0.25)
+  }
+  arcs = arcs.filter((a) => t - a.born < a.life)
+  ctx.lineJoin = 'round'
+  for (const a of arcs) drawArc(a, t)
+
+  requestAnimationFrame(frame)
+}
+
+// ---------- การชี้ ลาก ซูม ----------
+const drag = { on: false, moved: false, x: 0, y: 0, id: -1 }
+function pick(ev) {
+  const r = canvas.getBoundingClientRect(), x = ev.clientX - r.left, y = ev.clientY - r.top
+  const reach = ev.pointerType === 'touch' ? 24 : 14
+  let best = -1, bd = reach * reach
+  // จุดที่อยู่ด้านหน้าได้เปรียบเมื่อระยะใกล้เคียงกัน
+  nodes.forEach((n, i) => { const d = ((n.sx - x) ** 2 + (n.sy - y) ** 2) * (1.7 - 0.7 * n.fog); if (d < bd) { bd = d; best = i } })
+  return best
+}
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+const when = (ms) => new Date(ms).toLocaleDateString(loc(), { day: 'numeric', month: 'short', year: '2-digit' })
+const meta = (n) => `${esc(n.group)} · ${when(n.createdAt)}${n.source ? ' · ' + esc(n.source) : ''}`
+
+function showTip(ev) {
+  const tip = $('tip')
+  if (hover < 0) { tip.style.display = 'none'; canvas.classList.remove('pointing'); return }
+  const n = nodes[hover], r = canvas.getBoundingClientRect()
+  tip.innerHTML = `${esc(n.text)}<small>${meta(n)}</small>`
+  tip.style.display = 'block'
+  tip.style.left = Math.max(8, Math.min(ev.clientX - r.left + 14, r.width - tip.offsetWidth - 8)) + 'px'
+  tip.style.top = Math.max(8, Math.min(ev.clientY - r.top + 14, r.height - tip.offsetHeight - 8)) + 'px'
+  canvas.classList.add('pointing')
+}
+canvas.addEventListener('pointerdown', (ev) => {
+  drag.on = true; drag.moved = false; drag.x = ev.clientX; drag.y = ev.clientY; drag.id = ev.pointerId
+  canvas.setPointerCapture(ev.pointerId)
+})
+canvas.addEventListener('pointermove', (ev) => {
+  if (drag.on && ev.pointerId === drag.id) {
+    const dx = ev.clientX - drag.x, dy = ev.clientY - drag.y
+    if (!drag.moved && Math.hypot(dx, dy) < 5) return
+    drag.moved = true; drag.x = ev.clientX; drag.y = ev.clientY
+    cam.yaw += dx * 0.008; cam.pitch = Math.max(-1.2, Math.min(1.2, cam.pitch - dy * 0.006))
+    hover = -1; $('tip').style.display = 'none'; canvas.classList.add('dragging')
+    return
+  }
+  if (ev.pointerType === 'touch') return
+  hover = pick(ev); showTip(ev)
+})
+const endDrag = (ev) => {
+  if (!drag.on || ev.pointerId !== drag.id) return
+  drag.on = false; canvas.classList.remove('dragging')
+  if (drag.moved || ev.type === 'pointercancel') return
+  const i = pick(ev)
+  pinned = i === pinned ? -1 : i
+  if (pinned >= 0) showList(['near'], [pinned, ...neighbors[pinned]].map((idx) => ({ idx })))
+}
+canvas.addEventListener('pointerup', endDrag)
+canvas.addEventListener('pointercancel', endDrag)
+canvas.addEventListener('pointerleave', () => { if (!drag.on) { hover = -1; $('tip').style.display = 'none'; canvas.classList.remove('pointing') } })
+canvas.addEventListener('wheel', (ev) => { ev.preventDefault(); cam.zoom = Math.max(0.6, Math.min(2.6, cam.zoom * Math.exp(-ev.deltaY * 0.0012))) }, { passive: false })
+$('spin').addEventListener('click', () => {
+  cam.spin = !cam.spin
+  $('spin').textContent = t(cam.spin ? 'spinStop' : 'spinGo'); $('spin').setAttribute('aria-pressed', String(cam.spin))
+})
+
+// ---------- ข้อมูล ----------
 const api = async (path, body) => {
   const res = await fetch(path, {
     method: body ? 'POST' : 'GET',
     headers: { authorization: 'Bearer ' + cfg.key, ...(body ? { 'content-type': 'application/json' } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   })
-  if (!res.ok) throw new Error(res.status === 401 ? 'API key ไม่ถูกต้อง' : res.status === 403 ? 'key นี้ใช้กับสมองนี้ไม่ได้' : 'เซิร์ฟเวอร์ตอบ ' + res.status)
+  if (!res.ok) throw new Error(res.status === 401 ? t('badKey') : res.status === 403 ? t('wrongBrain') : t('serverSays', res.status))
   return res.json()
+}
+// ปุ่มแสดงสถานะกำลังทำงานและกดซ้ำไม่ได้ระหว่างรอ
+async function busy(btn, label, fn) {
+  const old = btn.textContent
+  btn.disabled = true; btn.textContent = label
+  try { return await fn() } finally { btn.disabled = false; btn.textContent = old }
 }
 
 // หมวดของความจำ: ใช้คำแรกของ source หรือ subject ถ้าไม่มีใช้ kind
@@ -114,143 +510,47 @@ const groupOf = (n) => {
   return head && head.length <= 14 ? head.toLowerCase() : n.kind
 }
 
-// วางจุดให้เต็มรูปสมอง: เรียงตามแกน x ของ PCA แล้วเกลี่ยตามพื้นที่ของรูป จากนั้นเรียงแกน y ภายในแต่ละคอลัมน์
-function layout() {
-  const off = new OffscreenCanvas(8, 8).getContext('2d')
-  const COLS = 120, STEP = 4, cols = []
-  for (let i = 0; i < COLS; i++) {
-    const x = 100 + ((i + 0.5) / COLS) * 860
-    const ys = []
-    for (let y = 30; y <= 750; y += STEP) if (off.isPointInPath(BRAIN, x, y)) ys.push(y)
-    cols.push({ x, ys })
-  }
-  const total = cols.reduce((a, c) => a + c.ys.length, 0)
-  const order = nodes.map((n, i) => i).sort((a, b) => nodes[a].x - nodes[b].x)
-  // ตำแหน่งแนวตั้งใช้อันดับของแกน y เทียบกับทั้งชุด ไม่ใช่ภายในคอลัมน์ ไม่งั้นข้อมูลน้อยจะกองเป็นเส้นตรงกลาง
-  const vRank = new Map(nodes.map((n, i) => i).sort((a, b) => nodes[b].y - nodes[a].y).map((idx, r) => [idx, (r + 0.5) / nodes.length]))
-  let k = 0, acc = 0
-  for (const col of cols) {
-    acc += col.ys.length
-    const upto = Math.round((acc / total) * order.length)
-    const members = order.slice(k, upto)
-    k = upto
-    members.forEach((idx) => {
-      const pos = col.ys.length ? col.ys[Math.min(col.ys.length - 1, Math.floor(vRank.get(idx) * col.ys.length))] : 380
-      const jitter = (h) => (((Math.sin(idx * 12.9898 + h) * 43758.5453) % 1) + 1) % 1 - 0.5
-      nodes[idx].px = col.x + jitter(1) * (860 / COLS) * 0.9
-      nodes[idx].py = pos + jitter(2) * STEP * 2
-    })
-  }
-}
-
-function resize() {
-  const r = canvas.getBoundingClientRect(), dpr = window.devicePixelRatio || 1
-  canvas.width = r.width * dpr; canvas.height = r.height * dpr
-  const s = Math.min(r.width / 1000, r.height / 780) * 0.96
-  view = { s: s * dpr, ox: (r.width - 1000 * s) / 2 * dpr, oy: (r.height - 780 * s) / 2 * dpr, dpr }
-}
-
-function draw(now) {
-  const t = (now - t0) / 1000
-  ctx.setTransform(1, 0, 0, 1, 0, 0)
-  ctx.clearRect(0, 0, canvas.width, canvas.height)
-  ctx.setTransform(view.s, 0, 0, view.s, view.ox, view.oy)
-
-  ctx.fillStyle = 'rgba(79, 209, 197, .05)'; ctx.fill(BRAIN)
-  ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(106, 169, 255, .55)'; ctx.stroke(BRAIN)
-  ctx.lineWidth = 1.2; ctx.strokeStyle = 'rgba(106, 169, 255, .14)'
-  for (const f of FOLDS) ctx.stroke(f)
-
-  const focus = pinned >= 0 ? pinned : hover
-  const near = focus >= 0 ? new Set(neighbors[focus]) : null
-  const searching = lit.size > 0
-
-  ctx.lineWidth = 0.7
-  for (const [a, b, sim] of edges) {
-    const A = nodes[a], B = nodes[b]
-    const hot = (lit.has(a) && lit.has(b)) || a === focus || b === focus
-    ctx.strokeStyle = hot ? 'rgba(246, 179, 82, .85)' : `rgba(120, 170, 255, ${searching ? 0.04 : 0.05 + Math.max(0, sim - 0.84) * 0.9})`
-    ctx.beginPath(); ctx.moveTo(A.px, A.py); ctx.lineTo(B.px, B.py); ctx.stroke()
-  }
-
-  nodes.forEach((n, i) => {
-    const score = lit.get(i)
-    const isLit = score !== undefined, isFocus = i === focus, isNear = near && near.has(i)
-    const base = 2.4 + Math.min(3, Math.log2(1 + n.count))
-    const pulse = isLit ? 1 + 0.25 * Math.sin(t * 4 + i) : 1
-    const r = (isLit ? base + 3 + score * 4 : isFocus ? base + 3 : base) * pulse
-    ctx.globalAlpha = searching && !isLit && !isFocus && !isNear ? 0.22 : 1
-    if (isLit || isFocus) { ctx.shadowColor = isLit ? '#f6b352' : n.color; ctx.shadowBlur = 18 } else ctx.shadowBlur = 0
-    ctx.fillStyle = isLit ? '#f6b352' : n.color
-    ctx.beginPath(); ctx.arc(n.px, n.py, r, 0, Math.PI * 2); ctx.fill()
-  })
-  ctx.globalAlpha = 1; ctx.shadowBlur = 0
-  requestAnimationFrame(draw)
-}
-
-function pick(ev) {
-  const r = canvas.getBoundingClientRect()
-  const x = ((ev.clientX - r.left) * view.dpr - view.ox) / view.s, y = ((ev.clientY - r.top) * view.dpr - view.oy) / view.s
-  let best = -1, bd = 14 * 14
-  nodes.forEach((n, i) => { const d = (n.px - x) ** 2 + (n.py - y) ** 2; if (d < bd) { bd = d; best = i } })
-  return best
-}
-
-const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
-const when = (ms) => new Date(ms).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })
-
-canvas.addEventListener('mousemove', (ev) => {
-  hover = pick(ev)
-  const tip = $('tip')
-  if (hover < 0) { tip.style.display = 'none'; canvas.style.cursor = 'default'; return }
-  const n = nodes[hover], r = canvas.getBoundingClientRect()
-  tip.innerHTML = `${esc(n.text)}<small>${esc(n.group)} · ${when(n.createdAt)}${n.source ? ' · ' + esc(n.source) : ''}</small>`
-  tip.style.display = 'block'
-  tip.style.left = Math.min(ev.clientX - r.left + 14, r.width - 350) + 'px'
-  tip.style.top = Math.min(ev.clientY - r.top + 14, r.height - 120) + 'px'
-  canvas.style.cursor = 'pointer'
-})
-canvas.addEventListener('mouseleave', () => { hover = -1; $('tip').style.display = 'none' })
-canvas.addEventListener('click', (ev) => {
-  const i = pick(ev)
-  pinned = i === pinned ? -1 : i
-  if (pinned >= 0) showList('ความจำนี้และที่ใกล้เคียง', [pinned, ...neighbors[pinned]].map((idx) => ({ idx })))
-})
-
-function showList(title, items, emptyText) {
-  $('side-title').textContent = title
+// title และ empty เป็น [คีย์ข้อความ, ...ค่าแทรก] เก็บไว้ใน shown เพื่อวาดใหม่เมื่อสลับภาษา
+let shown = [['results'], [], ['intro']]
+function showList(title, items, empty) {
+  shown = [title, items, empty]
+  $('side-title').textContent = t(...title)
   $('hits').innerHTML = items.length
     ? items.map(({ idx, score }) => {
         const n = nodes[idx]
-        return `<div class="hit" data-i="${idx}"><p>${esc(n.text)}</p><small>${score !== undefined ? 'คะแนน ' + score.toFixed(2) + ' · ' : ''}${esc(n.group)} · ${when(n.createdAt)}${n.source ? ' · ' + esc(n.source) : ''}</small></div>`
+        return `<div class="hit" data-i="${idx}" tabindex="0" role="button"><p>${esc(n.text)}</p><small>${score !== undefined ? t('score') + ' ' + score.toFixed(2) + ' · ' : ''}${meta(n)}</small></div>`
       }).join('')
-    : `<p class="empty">${esc(emptyText || '')}</p>`
+    : `<p class="empty">${esc(empty ? t(...empty) : '')}</p>`
   for (const el of $('hits').querySelectorAll('.hit')) {
-    el.addEventListener('mouseenter', () => { hover = Number(el.dataset.i) })
+    const i = Number(el.dataset.i)
+    el.addEventListener('mouseenter', () => { hover = i })
     el.addEventListener('mouseleave', () => { hover = -1 })
-    el.addEventListener('click', () => { pinned = Number(el.dataset.i) })
+    el.addEventListener('focus', () => { hover = i })
+    el.addEventListener('blur', () => { hover = -1 })
+    el.addEventListener('click', () => { pinned = i })
+    el.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); pinned = i } })
   }
 }
 
 $('search').addEventListener('submit', async (ev) => {
   ev.preventDefault()
   const q = $('q').value.trim()
-  lit = new Map(); pinned = -1
-  if (!q) return showList('ผลการค้น', [], 'พิมพ์คำถามด้านบน')
+  lit = new Map(); litIdx = []; pinned = -1
+  if (!q) return showList(['results'], [], ['typeAbove'])
   try {
-    const r = await api('/v1/search', { brain: cfg.container, q, limit: 8 })
+    const r = await busy($('go'), t('searching'), () => api('/v1/search', { brain: cfg.container, q, limit: 8 }))
     const byId = new Map(nodes.map((n, i) => [n.id, i]))
     const items = r.hits.map((h) => ({ idx: byId.get(h.id), score: h.score })).filter((x) => x.idx !== undefined)
     for (const it of items) lit.set(it.idx, it.score)
-    showList(`ผลการค้น ${items.length} รายการ`, items, r.reason === 'unknown_entity'
-      ? 'ไม่ตอบ: คำถามนี้ถามถึงรายที่ไม่เคยปรากฏในความจำ'
-      : 'ไม่มีความจำที่เกี่ยวข้องพอ สมองเลือกตอบว่าไม่รู้')
-  } catch (e) { showList('ผลการค้น', [], e.message) }
+    litIdx = [...lit.keys()]
+    if (items.length && !calm) { surge = 1; for (let i = 0; i < 5; i++) spawnArc(T) }
+    showList(['resultsN', items.length], items, [r.reason === 'unknown_entity' ? 'whyUnknown' : 'whyNoMatch'])
+  } catch (e) { showList(['results'], [], ['raw', e.message]) }
 })
 
 async function open() {
   const g = await api('/v1/graph?brain=' + encodeURIComponent(cfg.container))
-  nodes = g.nodes; edges = g.edges
+  nodes = g.nodes; edges = g.edges; pulses = []
   neighbors = nodes.map(() => [])
   for (const [a, b] of edges) { neighbors[a].push(b); neighbors[b].push(a) }
   const counts = new Map()
@@ -259,30 +559,46 @@ async function open() {
   const color = new Map(groups.map(([name], i) => [name, PALETTE[i % PALETTE.length]]))
   for (const n of nodes) n.color = color.get(n.group)
   layout()
-  $('stats').textContent = `${nodes.length.toLocaleString()} ความจำ · ${edges.length.toLocaleString()} เส้นเชื่อม · ${cfg.container}`
-  $('legend').innerHTML = groups.slice(0, 10).map(([name, c]) => `<span><i style="background:${color.get(name)}"></i>${esc(name)} ${c}</span>`).join('')
+  opened = true; showStats()
+  $('legend').innerHTML = groups.slice(0, 10).map(([name, c]) => `<span><i style="background:${color.get(name)};color:${color.get(name)}"></i>${esc(name)} ${c}</span>`).join('')
   $('gate').style.display = 'none'
   $('export').hidden = false; $('logout').hidden = false
-  if (!nodes.length) showList('ผลการค้น', [], 'สมองนี้ยังไม่มีความจำ')
+  if (!nodes.length) showList(['results'], [], ['emptyBrain'])
 }
+let opened = false
+const showStats = () => { if (opened) $('stats').textContent = t('stats', nodes.length.toLocaleString('en-US'), edges.length.toLocaleString('en-US'), cfg.container) }
+
+function applyLang() {
+  document.documentElement.lang = lang; document.title = t('title')
+  for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.dataset.i18n)
+  for (const el of document.querySelectorAll('[data-i18n-ph]')) el.placeholder = t(el.dataset.i18nPh)
+  for (const el of document.querySelectorAll('[data-i18n-aria]')) el.setAttribute('aria-label', t(el.dataset.i18nAria))
+  $('lang').textContent = t('other'); $('lang').setAttribute('aria-label', t('otherAria'))
+  $('spin').textContent = t(cam.spin ? 'spinStop' : 'spinGo')
+  $('err').textContent = ''
+  showStats(); showList(...shown)
+}
+$('lang').addEventListener('click', () => { lang = lang === 'th' ? 'en' : 'th'; localStorage.setItem('panya.lang', lang); applyLang() })
 
 $('login').addEventListener('submit', async (ev) => {
   ev.preventDefault()
-  cfg.container = $('container').value.trim(); cfg.key = $('key').value.trim()
+  cfg.container = $('container').value.trim(); cfg.key = window.PANYA_USER ? '' : $('key').value.trim()
+  $('err').textContent = ''
   try {
-    await open()
+    await busy($('enter'), t('signingIn'), open)
     sessionStorage.setItem('panya.container', cfg.container); sessionStorage.setItem('panya.key', cfg.key)
   } catch (e) { $('err').textContent = e.message }
 })
 
-$('logout').addEventListener('click', () => {
+$('logout').addEventListener('click', async () => {
   sessionStorage.removeItem('panya.container'); sessionStorage.removeItem('panya.key')
+  if (window.PANYA_USER) { await fetch('/auth/logout', { method: 'POST' }).catch(() => {}); location.href = '/login'; return }
   location.href = location.pathname
 })
 // ส่งออกทั้งสมองเป็นไฟล์ JSON ที่นำกลับเข้าได้ด้วย POST /v1/import
 $('export').addEventListener('click', async () => {
   try {
-    const data = await api('/v1/export?brain=' + encodeURIComponent(cfg.container))
+    const data = await busy($('export'), t('exporting'), () => api('/v1/export?brain=' + encodeURIComponent(cfg.container)))
     const a = document.createElement('a')
     a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' }))
     a.download = 'panya-' + cfg.container + '.json'
@@ -291,10 +607,46 @@ $('export').addEventListener('click', async () => {
   } catch (e) { $('stats').textContent = e.message }
 })
 
+// ล็อกอินด้วยชื่อผู้ใช้แล้ว (cookie): ไม่ต้องใช้ key · เลือกสมองจาก ?brain หรือสมองแรกที่ผู้ใช้เข้าได้
+const me = window.PANYA_USER
+if (me) {
+  $('key').hidden = true; $('key').required = false
+  $('logout').style.display = 'none' // ใช้ปุ่มออกจากระบบที่หัวหน้าแทน
+  if (!cfg.container) {
+    const own = me.brains.filter((b) => b !== '*')
+    cfg.container = me.role !== 'admin' && !me.brains.includes('*') && own.length ? own[0] : ''
+  }
+}
 $('container').value = cfg.container
+applyLang()
 window.addEventListener('resize', resize)
-resize(); requestAnimationFrame(draw)
-if (cfg.container && cfg.key) open().catch((e) => { $('err').textContent = e.message })
+resize(); requestAnimationFrame(frame)
+if (me && !cfg.container) {
+  // เข้าได้ทุกสมอง: เปิดสมองที่ใหญ่ที่สุด
+  fetch('/v1/overview').then((r) => r.json()).then((o) => {
+    const top = (o.brains || []).slice().sort((a, b) => b.live - a.live)[0]
+    if (top) { cfg.container = top.brain; $('container').value = top.brain; return open() }
+  }).catch((e) => { $('err').textContent = e.message })
+} else if (cfg.container && (cfg.key || me)) open().catch((e) => { $('err').textContent = e.message })
+</script>
+<script>
+// ปุ่มสลับโหมดสว่าง/มืด (ธีมเก็บใน localStorage panya.theme ใช้ร่วมกับทุกหน้า)
+(() => {
+  const lang = document.getElementById('lang'); if (!lang || !window.PanyaUI) return
+  const SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>'
+  const MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>'
+  const b = document.createElement('button'); b.type = 'button'; b.className = 'theme-btn'
+  const paint = () => {
+    const dark = PanyaUI.theme === 'dark', th = (document.documentElement.lang || 'th').startsWith('th')
+    b.innerHTML = dark ? SUN : MOON
+    const label = dark ? (th ? 'โหมดสว่าง' : 'Light mode') : (th ? 'โหมดมืด' : 'Dark mode')
+    b.setAttribute('aria-label', label); b.title = label
+  }
+  b.addEventListener('click', () => PanyaUI.setTheme(PanyaUI.theme === 'dark' ? 'light' : 'dark'))
+  lang.before(b); paint()
+  document.addEventListener('panya:theme', () => { paint(); window.dispatchEvent(new Event('resize')) })
+  new MutationObserver(paint).observe(document.documentElement, { attributes: true, attributeFilter: ['lang'] })
+})()
 </script>
 </body>
 </html>

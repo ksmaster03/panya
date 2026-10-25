@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>panya · สมองของฉัน</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="/assets/ui.css?v=1">
+<script src="/assets/ui.js?v=1"></script>
+<style>
+  .brain-card { display: grid; gap: 10px; }
+  .brain-card h3 { margin: 0; font-size: 18px; overflow-wrap: anywhere; }
+  .brain-card .meta { display: flex; flex-wrap: wrap; gap: 6px 14px; color: var(--muted); font-size: 14px; }
+  .brain-card .desc { color: var(--ink-2); font-size: 15px; margin: 0; }
+  .brain-card .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+  .count { font-size: 26px; font-weight: 700; line-height: 1; }
+  .count small { font-size: 14px; font-weight: 500; color: var(--muted); }
+  details.panel-x { border-top: 1px solid var(--line); padding-top: 10px; }
+  details.panel-x summary { cursor: pointer; font-weight: 600; color: var(--ink-2); min-height: 36px; display: flex; align-items: center; }
+  details.panel-x[open] summary { margin-bottom: 8px; }
+  .section-title { display: flex; align-items: center; gap: 10px; margin: 28px 0 12px; }
+  .section-title h2 { margin: 0; }
+</style>
+</head>
+<body>
+<header class="app-header"></header>
+<main id="main" class="page">
+  <div class="page-head">
+    <div><h1 data-i18n="title"></h1><p class="muted" data-i18n="lead"></p></div>
+    <span class="grow"></span>
+    <button class="btn primary" type="button" id="open-create" data-i18n="create"></button>
+  </div>
+  <div class="notice"><span data-i18n="rule"></span></div>
+
+  <div class="section-title"><h2 data-i18n="mine"></h2><span class="badge" id="n-mine"></span></div>
+  <div class="grid cols-3" id="mine"></div>
+
+  <div class="section-title"><h2 data-i18n="shared"></h2><span class="badge" id="n-shared"></span></div>
+  <div class="grid cols-3" id="shared"></div>
+</main>
+
+<dialog id="dlg-create">
+  <form method="dialog" id="create" novalidate>
+    <h2 data-i18n="createTitle"></h2>
+    <label class="field"><span data-i18n="name"></span><input id="c-name" maxlength="128" autocomplete="off" autocapitalize="none" spellcheck="false" required data-i18n-ph="namePh"><span class="hint" data-i18n="nameHint"></span></label>
+    <label class="field"><span data-i18n="desc"></span><input id="c-desc" maxlength="500" data-i18n-ph="descPh"></label>
+    <p id="c-err" role="alert" class="small" style="margin:0;color:var(--crit)"></p>
+    <div class="row" style="justify-content:flex-end"><button class="btn" value="cancel" formnovalidate data-i18n="cancel"></button><button class="btn primary" id="c-go" value="ok" data-i18n="create"></button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-delete">
+  <form method="dialog" id="del" novalidate>
+    <h2 data-i18n="delTitle"></h2>
+    <p id="d-text"></p>
+    <label class="field"><span id="d-label"></span><input id="d-name" autocomplete="off" autocapitalize="none" spellcheck="false"></label>
+    <div class="row" style="justify-content:flex-end"><button class="btn" value="cancel" formnovalidate data-i18n="cancel"></button><button class="btn danger" id="d-go" value="ok" data-i18n="delete"></button></div>
+  </form>
+</dialog>
+
+<datalist id="usernames"></datalist>
+<script>
+const UI = PanyaUI
+const L = {
+  th: {
+    title: 'สมองของฉัน', lead: 'สร้างสมองของคุณเอง เพิ่มความจำ และเลือกว่าจะให้ใครอ่านได้', create: 'สร้างสมองใหม่', mine: 'สมองที่ฉันเป็นเจ้าของ', shared: 'สมองที่คนอื่นแชร์ให้อ่าน',
+    rule: 'กฎสำคัญ: ห้ามเก็บรหัสผ่าน key token หรือข้อมูลลับ ระบบจะปฏิเสธอัตโนมัติ · เขียนได้เฉพาะสมองของคุณ สมองที่ได้รับแชร์อ่านและค้นได้อย่างเดียว',
+    createTitle: 'สร้างสมองใหม่', name: 'ชื่อสมอง', namePh: 'เช่น kosin-notes', nameHint: 'ตัวอักษรอังกฤษ ตัวเลข . _ : - ไม่เกิน 128 ตัว ชื่อต้องไม่ซ้ำกับใคร เปลี่ยนภายหลังไม่ได้',
+    desc: 'คำอธิบาย (ไม่บังคับ)', descPh: 'สมองนี้เก็บเรื่องอะไร', cancel: 'ยกเลิก', created: (n) => `สร้างสมอง ${n} แล้ว`,
+    memories: 'ความจำ', owner: 'เจ้าของ', admin: 'ผู้ดูแลระบบ', ownerBadge: 'เจ้าของ', readBadge: 'อ่านอย่างเดียว',
+    open3d: 'เปิดภาพสมอง', dashboard: 'แดชบอร์ด', export: 'ส่งออก', delete: 'ลบสมอง',
+    addTitle: 'เพิ่มความจำ', addPh: 'หนึ่งเรื่องต่อหนึ่งความจำ เช่น ประชุมทีมทุกวันจันทร์ 10 โมง', subject: 'เรื่อง (ไม่บังคับ)', attribute: 'หัวข้อ (ไม่บังคับ)', subjectPh: 'meeting:weekly', attributePh: 'time',
+    add: 'บันทึก', added: (a) => ({ created: 'บันทึกแล้ว', superseded: 'บันทึกแล้ว และแทนค่าเดิม', merged: 'มีอยู่แล้ว รวมเข้ากับรายการเดิม' })[a] || 'บันทึกแล้ว',
+    shareTitle: 'แชร์ให้อ่าน', shareHint: 'คนที่ได้รับแชร์อ่านและค้นได้ แต่เขียนหรือลบไม่ได้', sharePh: 'พิมพ์ชื่อผู้ใช้', shareAdd: 'เพิ่ม', shareNone: 'ยังไม่ได้แชร์ให้ใคร', shareSaved: 'บันทึกการแชร์แล้ว', removeReader: (u) => `เลิกแชร์กับ ${u}`,
+    unknownUser: 'ไม่มีผู้ใช้ชื่อนี้',
+    delTitle: 'ลบสมองนี้?', delText: (n, c) => `ความจำทั้งหมด ${c} รายการในสมอง "${n}" จะถูกลบถาวร กู้คืนไม่ได้ ควรส่งออกเก็บไว้ก่อน`, delLabel: (n) => `พิมพ์ "${n}" เพื่อยืนยัน`, deleted: 'ลบสมองแล้ว',
+    emptyMine: 'ยังไม่มีสมองของคุณ กด "สร้างสมองใหม่" เพื่อเริ่ม', emptyShared: 'ยังไม่มีใครแชร์สมองให้คุณ', viewerNote: 'บัญชี viewer สร้างสมองไม่ได้ ติดต่อผู้ดูแลถ้าต้องการสิทธิ์',
+    secret: 'ข้อความนี้ดูเหมือนรหัสผ่าน key หรือ token จึงไม่บันทึก กรุณาเอาข้อมูลลับออกแล้วลองใหม่',
+  },
+  en: {
+    title: 'My brains', lead: 'Create your own brains, add memories, and choose who can read them', create: 'New brain', mine: 'Brains I own', shared: 'Shared with me (read-only)',
+    rule: 'Important: never store passwords, keys, tokens or other secrets; they are refused automatically. You can write only to your own brains; shared brains are read and search only.',
+    createTitle: 'Create a brain', name: 'Brain name', namePh: 'e.g. kosin-notes', nameHint: 'Letters, digits and . _ : - (up to 128). Must be unique and cannot be renamed later.',
+    desc: 'Description (optional)', descPh: 'What this brain is for', cancel: 'Cancel', created: (n) => `Brain ${n} created`,
+    memories: 'memories', owner: 'Owner', admin: 'administrator', ownerBadge: 'Owner', readBadge: 'Read-only',
+    open3d: 'Open brain view', dashboard: 'Dashboard', export: 'Export', delete: 'Delete brain',
+    addTitle: 'Add a memory', addPh: 'One fact per memory, e.g. Team meeting every Monday at 10:00', subject: 'Subject (optional)', attribute: 'Attribute (optional)', subjectPh: 'meeting:weekly', attributePh: 'time',
+    add: 'Save', added: (a) => ({ created: 'Saved', superseded: 'Saved and replaced the old value', merged: 'Already known; merged with the existing memory' })[a] || 'Saved',
+    shareTitle: 'Share for reading', shareHint: 'People you share with can read and search, but cannot write or delete.', sharePh: 'Type a username', shareAdd: 'Add', shareNone: 'Not shared with anyone', shareSaved: 'Sharing saved', removeReader: (u) => `Stop sharing with ${u}`,
+    unknownUser: 'No user with that name',
+    delTitle: 'Delete this brain?', delText: (n, c) => `All ${c} memories in "${n}" will be deleted permanently. Export it first if you may need it.`, delLabel: (n) => `Type "${n}" to confirm`, deleted: 'Brain deleted',
+    emptyMine: 'You have no brains yet. Choose "New brain" to start.', emptyShared: 'Nobody has shared a brain with you yet', viewerNote: 'Viewer accounts cannot create brains. Ask an administrator for access.',
+    secret: 'This looks like a password, key or token, so it was not saved. Remove the secret and try again.',
+  },
+}
+const t = (k, ...a) => UI.t(L, k, ...a)
+const $ = (id) => document.getElementById(id)
+let data = { brains: [], canCreate: false }, usernames = [], deleting = null
+
+UI.header('/brains')
+
+const fmt = (n) => Number(n || 0).toLocaleString(UI.lang === 'th' ? 'th-TH' : 'en-US')
+const ownerName = (o) => (o === '(admin)' ? t('admin') : o)
+
+function card(b) {
+  const own = b.access === 'owner', n = UI.esc(b.name), enc = encodeURIComponent(b.name)
+  const readers = (b.readers || []).map((u) => `<span class="chip">${UI.esc(u)}<button type="button" data-unshare="${UI.esc(u)}" aria-label="${UI.esc(t('removeReader', u))}">×</button></span>`).join('')
+  return `<article class="card brain-card" data-brain="${n}">
+    <div class="row"><h3>${n}</h3><span class="grow"></span><span class="badge ${own ? 'brand' : ''}">${own ? t('ownerBadge') : t('readBadge')}</span></div>
+    ${b.description ? `<p class="desc">${UI.esc(b.description)}</p>` : ''}
+    <div class="count">${fmt(b.memories)} <small>${t('memories')}</small></div>
+    <div class="meta"><span>${t('owner')}: ${UI.esc(ownerName(b.owner))}</span></div>
+    <div class="actions">
+      <a class="btn sm" href="/brain?brain=${enc}">${t('open3d')}</a>
+      <a class="btn sm" href="/dashboard?brain=${enc}">${t('dashboard')}</a>
+      <button class="btn sm" type="button" data-export>${t('export')}</button>
+      ${own ? `<button class="btn sm danger" type="button" data-delete>${t('delete')}</button>` : ''}
+    </div>
+    ${own ? `
+    <details class="panel-x" data-panel="add"><summary>${t('addTitle')}</summary>
+      <form class="stack" data-add novalidate>
+        <textarea name="text" maxlength="2000" required placeholder="${UI.esc(t('addPh'))}" aria-label="${UI.esc(t('addTitle'))}"></textarea>
+        <div class="grid cols-2" style="gap:8px">
+          <label class="field"><span>${t('subject')}</span><input name="subject" maxlength="191" placeholder="${t('subjectPh')}"></label>
+          <label class="field"><span>${t('attribute')}</span><input name="attribute" maxlength="191" placeholder="${t('attributePh')}"></label>
+        </div>
+        <div class="row"><button class="btn primary sm">${t('add')}</button></div>
+      </form>
+    </details>
+    <details class="panel-x" data-panel="share"><summary>${t('shareTitle')} (${(b.readers || []).length})</summary>
+      <p class="muted small">${t('shareHint')}</p>
+      <div class="chips" style="margin-bottom:8px">${readers || `<span class="muted small">${t('shareNone')}</span>`}</div>
+      <form class="row" data-share novalidate>
+        <input name="user" list="usernames" autocomplete="off" autocapitalize="none" placeholder="${UI.esc(t('sharePh'))}" aria-label="${UI.esc(t('sharePh'))}" style="flex:1 1 160px">
+        <button class="btn sm">${t('shareAdd')}</button>
+      </form>
+    </details>` : ''}
+  </article>`
+}
+
+function render() {
+  document.title = 'panya · ' + t('title')
+  UI.apply(L)
+  // วาดใหม่แล้วแผงที่ผู้ใช้เปิดไว้ (เพิ่มความจำ/แชร์) ต้องยังเปิดอยู่ ไม่งั้นมองไม่เห็นผลที่เพิ่งทำ
+  const open = new Set([...document.querySelectorAll('[data-brain] details[open]')].map((d) => d.closest('[data-brain]').dataset.brain + '|' + d.dataset.panel))
+  const mine = data.brains.filter((b) => b.access === 'owner'), shared = data.brains.filter((b) => b.access !== 'owner')
+  $('n-mine').textContent = mine.length; $('n-shared').textContent = shared.length
+  $('mine').innerHTML = mine.map(card).join('') || `<div class="card empty">${t(data.canCreate ? 'emptyMine' : 'viewerNote')}</div>`
+  $('shared').innerHTML = shared.map(card).join('') || `<div class="card empty">${t('emptyShared')}</div>`
+  $('open-create').hidden = !data.canCreate
+  for (const d of document.querySelectorAll('[data-brain] details')) if (open.has(d.closest('[data-brain]').dataset.brain + '|' + d.dataset.panel)) d.open = true
+}
+
+async function load() {
+  try { data = await UI.api('GET', '/v1/brains'); render() } catch (e) { UI.toast(e.message, true) }
+}
+
+// สร้าง
+$('open-create').addEventListener('click', () => { $('c-err').textContent = ''; $('create').reset(); $('dlg-create').showModal(); $('c-name').focus() })
+$('create').addEventListener('submit', async (ev) => {
+  if (ev.submitter?.value !== 'ok') return
+  ev.preventDefault()
+  const name = $('c-name').value.trim(), description = $('c-desc').value.trim()
+  try { await UI.api('POST', '/v1/brains', { name, description }); $('dlg-create').close(); UI.toast(t('created', name)); await load() }
+  catch (e) { $('c-err').textContent = /secret/i.test(e.message) ? t('secret') : e.message }
+})
+
+// การทำงานบนการ์ด
+document.addEventListener('click', async (ev) => {
+  const cardEl = ev.target.closest('[data-brain]'); if (!cardEl) return
+  const name = cardEl.dataset.brain, b = data.brains.find((x) => x.name === name)
+  if (ev.target.closest('[data-export]')) {
+    try {
+      const r = await fetch('/v1/export?brain=' + encodeURIComponent(name)); if (!r.ok) throw new Error(String(r.status))
+      const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(await r.blob()), download: `panya-${name}.json` }); a.click(); URL.revokeObjectURL(a.href)
+    } catch (e) { UI.toast(e.message, true) }
+  } else if (ev.target.closest('[data-delete]')) {
+    deleting = b; $('d-text').textContent = t('delText', name, fmt(b.memories)); $('d-label').textContent = t('delLabel', name); $('d-name').value = ''; $('dlg-delete').showModal(); $('d-name').focus()
+  } else if (ev.target.closest('[data-unshare]')) {
+    const u = ev.target.closest('[data-unshare]').dataset.unshare
+    await saveReaders(b, (b.readers || []).filter((x) => x !== u))
+  }
+})
+document.addEventListener('submit', async (ev) => {
+  const form = ev.target, cardEl = form.closest('[data-brain]'); if (!cardEl) return
+  ev.preventDefault()
+  const name = cardEl.dataset.brain, b = data.brains.find((x) => x.name === name)
+  if (form.matches('[data-add]')) {
+    const f = new FormData(form), text = String(f.get('text') || '').trim()
+    if (!text) return form.querySelector('textarea').focus()
+    const body = { brain: name, text }
+    for (const k of ['subject', 'attribute']) { const v = String(f.get(k) || '').trim(); if (v) body[k] = v }
+    try { const r = await UI.api('POST', '/v1/memories', body); UI.toast(t('added', r.action)); form.reset(); await load() }
+    catch (e) { UI.toast(/secret/i.test(e.message) ? t('secret') : e.message, true) }
+  } else if (form.matches('[data-share]')) {
+    const u = String(new FormData(form).get('user') || '').trim().toLowerCase()
+    if (!u) return
+    if (usernames.length && !usernames.includes(u)) return UI.toast(t('unknownUser'), true)
+    await saveReaders(b, [...new Set([...(b.readers || []), u])])
+  }
+})
+async function saveReaders(b, readers) {
+  try { await UI.api('PATCH', '/v1/brains/' + encodeURIComponent(b.name), { readers }); UI.toast(t('shareSaved')); await load() }
+  catch (e) { UI.toast(e.message, true) }
+}
+
+// ลบ
+$('del').addEventListener('submit', async (ev) => {
+  if (ev.submitter?.value !== 'ok') return
+  ev.preventDefault()
+  if (!deleting || $('d-name').value.trim() !== deleting.name) { $('d-name').focus(); return }
+  try { await UI.api('DELETE', `/v1/brains/${encodeURIComponent(deleting.name)}?confirm=${encodeURIComponent(deleting.name)}`); $('dlg-delete').close(); UI.toast(t('deleted')); await load() }
+  catch (e) { UI.toast(e.message, true) }
+})
+
+document.addEventListener('panya:lang', render)
+render(); load()
+UI.api('GET', '/v1/usernames').then((r) => {
+  usernames = r.usernames.filter((u) => u !== window.PANYA_USER?.username)
+  $('usernames').innerHTML = usernames.map((u) => `<option value="${UI.esc(u)}">`).join('')
+}).catch(() => {})
+</script>
+</body>
+</html>

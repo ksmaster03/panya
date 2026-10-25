@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>panya · เข้าสู่ระบบ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="/assets/ui.css?v=1">
+<script src="/assets/ui.js?v=1"></script>
+<style>
+  body { min-height: 100vh; display: flex; flex-direction: column; background: radial-gradient(900px 520px at 85% -10%, color-mix(in srgb, var(--brand) 18%, transparent), transparent 70%), radial-gradient(700px 480px at -10% 110%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 70%), var(--bg); }
+  .wrap { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 440px); gap: 48px; align-items: center; max-width: 1100px; width: 100%; margin: 0 auto; padding: 32px 16px; }
+  .pitch h1 { font-size: clamp(28px, 3.6vw, 40px); }
+  .pitch p { color: var(--ink-2); font-size: 17px; max-width: 46ch; }
+  .pitch ul { list-style: none; padding: 0; margin: 20px 0 0; display: grid; gap: 10px; color: var(--ink-2); }
+  .pitch li { display: flex; gap: 10px; align-items: flex-start; }
+  .pitch li svg { flex: none; width: 22px; height: 22px; color: var(--accent); margin-top: 3px; }
+  form.card { padding: 28px; display: grid; gap: 14px; }
+  form.card h2 { margin: 0; font-size: 22px; }
+  #err { color: var(--crit); min-height: 1.6em; margin: 0; font-size: 15px; }
+  .pw-wrap { position: relative; }
+  .pw-wrap input { padding-right: 74px; }
+  .pw-wrap button { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); min-height: 34px; }
+  @media (max-width: 860px) { .wrap { grid-template-columns: 1fr; gap: 24px; } .pitch ul { display: none; } .pitch { text-align: center; } .pitch p { margin-inline: auto; } }
+</style>
+</head>
+<body>
+<header class="app-header"></header>
+<main id="main" class="wrap">
+  <section class="pitch">
+    <h1 data-i18n="headline"></h1>
+    <p data-i18n="sub"></p>
+    <ul>
+      <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span data-i18n="p1"></span></li>
+      <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span data-i18n="p2"></span></li>
+      <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span data-i18n="p3"></span></li>
+    </ul>
+  </section>
+  <form id="f" class="card" novalidate>
+    <h2 data-i18n="signIn"></h2>
+    <p class="muted small" style="margin:0" data-i18n="help"></p>
+    <label class="field" for="u"><span data-i18n="user"></span><input id="u" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus></label>
+    <label class="field" for="p"><span data-i18n="pass"></span>
+      <span class="pw-wrap"><input id="p" name="password" type="password" autocomplete="current-password" required><button class="btn sm ghost" type="button" id="show" aria-controls="p" aria-pressed="false"></button></span></label>
+    <button class="btn primary" id="go" type="submit" data-i18n="signIn"></button>
+    <p id="err" role="alert"></p>
+    <p class="muted small" style="margin:0" data-i18n="forgot"></p>
+  </form>
+</main>
+<script>
+const UI = PanyaUI
+const L = {
+  th: { title: 'panya · เข้าสู่ระบบ', headline: 'สมองที่สองของทีม', sub: 'เก็บความรู้ตามจริง ค้นเจอทั้งไทยและอังกฤษ และบอกตรง ๆ เมื่อไม่รู้',
+        p1: 'เก็บข้อความตามจริง ไม่แต่งเติม', p2: 'สมองของแต่ละคน แชร์ให้อ่านได้', p3: 'ปฏิเสธรหัสผ่านและ key อัตโนมัติ',
+        signIn: 'เข้าสู่ระบบ', signingIn: 'กำลังเข้าสู่ระบบ…', help: 'ใช้ชื่อผู้ใช้และรหัสผ่านที่ผู้ดูแลให้ไว้', user: 'ชื่อผู้ใช้', pass: 'รหัสผ่าน', show: 'แสดง', hide: 'ซ่อน',
+        forgot: 'ลืมรหัสผ่าน ติดต่อผู้ดูแลระบบเพื่อรีเซ็ต', empty: 'กรอกชื่อผู้ใช้และรหัสผ่าน', wrong: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง', locked: 'ลองผิดหลายครั้งเกินไป รอ 15 นาทีแล้วลองใหม่', down: 'ติดต่อเซิร์ฟเวอร์ไม่ได้ ลองใหม่อีกครั้ง' },
+  en: { title: 'panya · Sign in', headline: 'Your team’s second brain', sub: 'Keep knowledge word for word, find it in Thai or English, and get an honest “I don’t know” when it isn’t there.',
+        p1: 'Stores text verbatim, never rewritten', p2: 'Personal brains you can share read-only', p3: 'Passwords and keys are refused automatically',
+        signIn: 'Sign in', signingIn: 'Signing in…', help: 'Use the username and password your administrator gave you.', user: 'Username', pass: 'Password', show: 'Show', hide: 'Hide',
+        forgot: 'Forgot your password? Ask an administrator to reset it.', empty: 'Enter your username and password', wrong: 'Wrong username or password', locked: 'Too many attempts. Wait 15 minutes and try again.', down: 'Could not reach the server. Try again.' },
+}
+const t = (k) => UI.t(L, k)
+const $ = (id) => document.getElementById(id)
+UI.header('/login')
+const paint = () => { document.title = t('title'); UI.apply(L); $('show').textContent = t($('p').type === 'password' ? 'show' : 'hide'); $('err').textContent = '' }
+document.addEventListener('panya:lang', paint)
+paint()
+$('show').addEventListener('click', () => { const on = $('p').type === 'password'; $('p').type = on ? 'text' : 'password'; $('show').setAttribute('aria-pressed', String(on)); $('show').textContent = t(on ? 'hide' : 'show') })
+
+// กลับไปหน้าที่ขอไว้ เฉพาะ path ภายในเว็บนี้
+const next = (() => { const n = new URLSearchParams(location.search).get('next') || ''; return /^\/(?!\/)[^\\]*$/.test(n) ? n : '/dashboard' })()
+
+$('f').addEventListener('submit', async (ev) => {
+  ev.preventDefault()
+  const username = $('u').value.trim(), password = $('p').value
+  if (!username || !password) { $('err').textContent = t('empty'); return }
+  $('go').disabled = true; $('go').textContent = t('signingIn'); $('err').textContent = ''
+  try {
+    const r = await fetch('/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username, password }) })
+    if (r.ok) { location.replace(next); return }
+    $('err').textContent = t(r.status === 429 ? 'locked' : r.status === 401 ? 'wrong' : 'down')
+    $('p').value = ''; $('p').focus()
+  } catch { $('err').textContent = t('down') }
+  $('go').disabled = false; $('go').textContent = t('signIn')
+})
+</script>
+</body>
+</html>

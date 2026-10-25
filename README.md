@@ -47,8 +47,24 @@ bun run dev                   # http://127.0.0.1:6800
 bun run test        # needs seekdb running
 bun run typecheck
 bun run eval        # retrieval quality on eval/dataset.json
+bun eval/run.ts --rerank --haystack <brain>[:<count>]   # same, with the reranker and real memories as distractors
 bun run bench       # speed
 ```
+
+`--haystack <brain>[:<count>]` mixes real memories from one of your brains into the eval as distractors. They are read from the database at run time and removed afterwards; they are never written to a file.
+
+## Start automatically on Windows
+
+`scripts/start-panya.ps1` starts Docker Desktop if it is not running, brings up the seekdb container, waits for it, then keeps `bun src/index.ts` running: after a crash it restarts 15 s later. Output goes to `logs/panya.log`.
+
+To run it at every logon without admin rights, put a small `.vbs` file in the Startup folder (Win+R, then `shell:startup`):
+
+```vbs
+Set WshShell = CreateObject("WScript.Shell")
+WshShell.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""<path-to-repo>\scripts\start-panya.ps1""", 0, False
+```
+
+It starts when you log on, not when the machine boots; Docker Desktop also needs a logged-in session. To stop panya, end the `powershell` launcher first and then `bun`, otherwise the launcher starts it again.
 
 ## Run with Docker
 
@@ -71,8 +87,10 @@ Every route under `/v1` needs `Authorization: Bearer <key>`.
 |---|---|
 | `POST /v1/memories` | Store `{ brain, text, subject?, attribute?, kind?, validUntil?, source?, ref? }` |
 | `POST /v1/memories/batch` | Store up to 200 at once: `{ brain, memories: [...] }`. All-or-nothing validation |
-| `POST /v1/search` | `{ brain, q, limit?, minScore? }` returns `{ hits, abstained, reason? }` |
+| `POST /v1/search` | `{ brain, q, limit?, minScore?, rerank? }` returns `{ hits, abstained, reason? }`. `rerank: false` skips the optional reranker for this request |
 | `GET /v1/graph?brain=` | Nodes with 2D positions and nearest-neighbour edges, for the brain view |
+| `GET /v1/points?brain=` | Every live memory as a 2D point (PCA over all embeddings) with its group and date, plus neighbour edges over a spread-out sample. No memory text. Computed at start-up and cached for 10 minutes |
+| `GET /v1/memories/:id?brain=` | One memory, used to show its text when you point at it on the dashboard |
 | `GET /v1/profile?brain=` | Preferences, keyed facts and recent items |
 | `PUT /v1/entities` | Register names: `{ brain, type, cues, names }` |
 | `GET /v1/entities?brain=` | List registered names |
@@ -107,6 +125,37 @@ bun run import:claude-memory <folder> --brain my-notes
 
 Each file becomes several short memories (its description plus paragraph-sized chunks). Tokens and keys are replaced with `[redacted]` before storage. Re-running replaces what was imported from the same file. The data stays in your local seekdb.
 
+## Dashboard
+
+Open `http://127.0.0.1:6800/dashboard` and sign in with an API key. It shows every brain the key can reach: a 3D core with one orb per brain, memories flying in (writes) and out (searches) as they happen, a live feed, signal strips, write and search charts, and a sortable statistics table. Thai and English, switchable in the header. Data comes from `GET /v1/overview` (statistics, cached for five seconds) and `GET /v1/events` (the last 300 writes, searches and deletes that went through this server; kept in memory, so a restart clears them).
+
+A row of buttons above the numbers switches between all brains and one brain at a time; the numbers, charts, live feed, signal strips and the highlighted orb then follow that brain, and the choice is kept in the URL (`/dashboard?brain=<name>`) so a link opens the same view. Clicking an orb or a table row selects that brain too.
+
+The 3D brain in the middle plots every live memory of the selected brains as a coloured point (colour = group, as on `/brain`), with neighbour links and signals running along them; with tens of thousands of memories it draws small squares instead of glows to keep the frame rate up (about 21 fps with 23,648 points on a laptop CPU). A sample appears first and the full set replaces it when ready. Viewers without a key see positions, groups and dates only; with a key, pointing at a point fetches its text.
+
+## Warehouse view
+
+Open `http://127.0.0.1:6800/warehouse` for the same data as a 3D warehouse (Three.js r170, bundled in `src/assets`, no internet needed): each brain is a zone with its own dock door and forklift, each group is a rack (the 9 largest groups per brain, the rest folded into "Other"), and each box stands for a fixed number of memories shown on screen (100 per box at 41,871 memories). Boxes received in the last 24 hours are lighter. Real writes send that zone's forklift from the dock to the matching rack; a search makes the racks of that brain glow. Click a rack for its count, share of the zone, and last write. Same access rules as the dashboard; uses `/v1/overview`, `/v1/points` and `/v1/events`.
+
+To let people view the dashboard without a key, set `PANYA_PUBLIC_DASHBOARD=lan` (no key needed from this machine and private network addresses) or `all`. Only `GET /v1/overview` and `GET /v1/events` open up, read-only; the live feed then shows memory text and search questions to anyone who can reach the page. `lan` trusts the connection's own address, so behind a reverse proxy every request looks local: do not use it there. A request that sends a wrong key is still refused.
+
+A sound bar sits at the bottom of the dashboard: play/pause, a waveform of the whole track that you click to seek, live frequency bars, and volume. It plays `src/assets/mr-scratch.mp3`, served at `GET /assets/<file>` (only mp3, ogg and wav files in `src/assets`, with Range support). The audio file is not included in the repository: put your own file at that path.
+
+## Claude Code skills
+
+`skills/` holds two example skills that let Claude Code on any machine share skills and memory through one panya server, over the HTTP API. Copy a folder into `~/.claude/skills/` and run its `setup` once:
+
+```bash
+node ~/.claude/skills/panya-memory/scripts/panya-memory.mjs setup --url http://<host>:6800 --key <api key>
+```
+
+| Skill | Send | Receive |
+|---|---|---|
+| `panya-skills` | `push` every `SKILL.md` and command into the `claude-skills` brain | `list`, `search`, `show <name>`, or `pull <name>` to install one locally |
+| `panya-memory` | `push` Claude Code memory files, or `remember "<fact>"` | `search "<question>"`, `list`, `show`, or `pull <project> --to <dir>` |
+
+Both need only Node 18+. Only `.md` files travel: a skill's scripts and assets are not sent. Documents are rebuilt from their chunks with `GET /v1/memories?brain=&subject=`; `GET /v1/subjects?brain=&prefix=` lists what is stored.
+
 ## How it decides
 
 1. Tokenise the query. Thai goes through `Intl.Segmenter`; codes are kept whole.
@@ -116,6 +165,34 @@ Each file becomes several short memories (its description plus paragraph-sized c
 5. Score each candidate from normalised similarity and the share of query words it contains. Anything under `minScore` is discarded. No survivors means `abstained: true`.
 
 Thresholds live in `src/config.ts` and come from `bun run eval`, which tunes on half the questions and reports on the other half.
+
+## Reranker (optional)
+
+A small cross-encoder (`onnx-community/bge-reranker-v2-m3-ONNX`, run through transformers.js like the embedder) can score each (question, memory) pair among the top candidates and blend that with the existing score. It only scores; it never writes or rewrites text.
+
+It is off by default.
+
+- `PANYA_RERANK=1` turns it on.
+- `PANYA_RERANK_TOP` (default 10) is how many top candidates are rescored.
+- `PANYA_RERANK_WEIGHT` (default 0.7) and `PANYA_RERANK_MIN_SCORE` (default 0.2) control the blend and the cut-off.
+- A request can skip it with `"rerank": false` in `POST /v1/search`. The response has `"reranked": true` when it ran.
+- For Docker, `--build-arg BAKE_RERANKER=1` bakes the model (about 570 MB) into the image.
+
+Measured on 12 October 2026 on a laptop CPU (Intel i7-1165G7, no discrete GPU). The eval set was 100 synthetic Thai memories plus 7,088 real memories as distractors, with 120 questions.
+
+| Setup | Correct at rank 1 | Abstains when no answer exists | Search time (mean) |
+|---|---|---|---|
+| Default thresholds | 82% | 60% | 81 ms |
+| Re-tuned thresholds, no reranker (`lexWeight=0.5 simFloor=0.84 simCeil=0.9 minScore=0.4`) | 79% | 90% | 81 ms |
+| Reranker, top 5 | 82% | 95% | 1,700 ms (p95 4,300 ms) |
+
+The first row is all 120 questions with the shipped defaults. The other two rows are the 60 held-out questions after tuning on the other 60.
+
+Read this honestly: on a CPU, most of the gain is available for free by re-tuning the thresholds on your own data. The reranker adds a few points at a large latency cost, so it is worth it mainly with a GPU or when queries are rare.
+
+Two smaller rerankers were tried and rejected: `Xenova/bge-reranker-base` dropped Thai rank-1 accuracy to 72%, and `gte-multilingual-reranker-base` does not load in transformers.js.
+
+Reproduce: `bun eval/run.ts --rerank --haystack <brain>[:<count>]`.
 
 ## Results
 
@@ -151,6 +228,7 @@ Memory: about 1 GB RSS for the panya process; seekdb documents a 2 GB minimum.
 
 - Paraphrases far from the stored wording are missed (67% correct at rank 1 on paraphrased questions).
 - In-domain questions with no answer are still answered about one time in four, for example a question about a carrier's fleet size returns other facts about that carrier.
+- With thousands of memories in one brain the shipped thresholds answer too readily: correct abstention fell to 60% with 7,088 distractors. Re-tune them with the haystack eval.
 - Bare numbers and single letters ("gate 5", "zone Z") are not treated as identifiers.
 - It cannot summarise. Send one short fact per memory, 2000 characters at most.
 - seekdb embedded mode hung on Windows under both Bun and Node (tested 7 October 2026). Use the Docker server.

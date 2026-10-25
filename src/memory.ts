@@ -1,7 +1,10 @@
 import { SeekdbClient, Schema, FulltextIndexConfig, VectorIndexConfig, type Collection, type Where } from 'seekdb'
 import { config, type SearchTuning } from './config'
 import type { Embedder } from './embed'
+import type { Reranker } from './rerank'
 import { EntityRegistry, norm } from './entities'
+import { UserRegistry } from './users'
+import { BrainRegistry } from './brains'
 import { coverage, extractCodes, tokenize } from './tokenize'
 
 export type Kind = 'fact' | 'preference' | 'event'
@@ -34,6 +37,8 @@ export interface Memory {
   validUntil: number
   active: boolean
   supersededBy: string
+  /** เวลาที่ถูกแทน (0 = ยังเป็นค่าปัจจุบัน หรือถูกแทนก่อนมีฟิลด์นี้) */
+  invalidAt: number
   count: number
   source: string
   ref: string
@@ -43,10 +48,19 @@ export interface SearchHit extends Memory {
   score: number
   sim: number
   coverage: number
+  /** คะแนนจาก reranker (0-1) มีเมื่อการค้นครั้งนี้ถูกจัดอันดับซ้ำ */
+  rerank?: number
+  /** คะแนนแยกส่วน เมื่อขอ explain */
+  explain?: {
+    denseRank: number; lexRank: number; sim: number; simNorm: number; coverage: number
+    weighted: number; rrf: number; decay: number; fusion: string; rerank?: number
+  }
 }
 
 export interface SearchResult {
   hits: SearchHit[]
+  /** true = ผลชุดนี้ผ่าน reranker แล้ว */
+  reranked?: boolean
   /** true = ไม่มีความจำที่เกี่ยวพอ ผู้เรียกควรถือว่า "ไม่รู้" */
   abstained: boolean
   /** เหตุที่ไม่ตอบ: unknown_entity = คำค้นถามถึงรายที่ไม่มีในทะเบียนและไม่เคยปรากฏในความจำ */
@@ -70,7 +84,33 @@ export interface Graph {
   edges: [number, number, number][]
 }
 
-export type RememberResult = { memory: Memory; action: 'created' | 'superseded' | 'merged' }
+/** สถิติของ brain หนึ่ง สำหรับหน้าแดชบอร์ด */
+export interface BrainStats {
+  brain: string
+  /** ความจำที่ยังใช้ได้ */
+  live: number
+  /** รุ่นเก่าที่ถูกค่าใหม่แทนแล้ว */
+  superseded: number
+  expired: number
+  /** ยังใช้ได้ แต่จะหมดอายุภายใน 7 วัน */
+  expiringSoon: number
+  kinds: Record<Kind, number>
+  /** มี subject + attribute */
+  keyed: number
+  sources: number
+  /** จำนวนครั้งที่ข้อความซ้ำถูกรวมเข้ารายการเดิม */
+  merges: number
+  /** จำนวนตัวอักษรรวมของความจำที่ยังใช้ได้ */
+  chars: number
+  firstAt: number
+  lastAt: number
+  /** จำนวนที่เขียนเข้ามา นับถอยหลังจากตอนนี้ ช่องสุดท้าย = ช่วงล่าสุด */
+  minute: number[]
+  hour: number[]
+  day: number[]
+}
+
+export type RememberResult ={ memory: Memory; action: 'created' | 'superseded' | 'merged' }
 
 type Meta = Record<string, string | number>
 const NEVER = 9_000_000_000_000_000
@@ -88,6 +128,7 @@ function toMemory(id: string, m: Meta): Memory {
     validUntil: Number(m.validUntil) >= NEVER ? 0 : Number(m.validUntil),
     active: Number(m.active) === 1,
     supersededBy: String(m.supersededBy ?? ''),
+    invalidAt: Number(m.invalidAt ?? 0),
     count: Number(m.count ?? 1),
     source: String(m.source ?? ''),
     ref: String(m.ref ?? ''),
@@ -95,6 +136,19 @@ function toMemory(id: string, m: Meta): Memory {
 }
 
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x))
+const round4 = (x: number) => Math.round(x * 10000) / 10000
+
+// Reciprocal Rank Fusion: 1/(k + อันดับ) รวมสองฝั่ง · k = 60 ตามงานต้นฉบับ (Cormack et al. 2009)
+// คูณ RRF_SCALE ให้ค่าอยู่ราว 0-1 อ่านง่ายใน explain (ค่าสูงสุด 2/61)
+const RRF_K = 60
+const RRF_SCALE = (RRF_K + 1) / 2
+
+/** ความจำแบบเหตุการณ์ (kind=event) ค่อย ๆ ลดน้ำหนักตามอายุ ครึ่งหนึ่งทุก halfLife วัน · ข้อเท็จจริงและความชอบไม่ลด */
+export function recencyDecay(m: Pick<Memory, 'kind' | 'lastSeenAt' | 'createdAt'>, now: number, halfLifeDays: number): number {
+  if (m.kind !== 'event' || !(halfLifeDays > 0)) return 1
+  const ageDays = Math.max(0, now - (m.lastSeenAt || m.createdAt)) / 86_400_000
+  return Math.pow(0.5, ageDays / halfLifeDays)
+}
 
 export class MemoryStore {
   private constructor(
@@ -103,6 +157,9 @@ export class MemoryStore {
     private embedder: Embedder,
     readonly entities: EntityRegistry,
     private readers: { client: SeekdbClient; col: Collection }[],
+    private reranker: Reranker | null,
+    readonly users: UserRegistry,
+    readonly brains: BrainRegistry,
   ) {}
 
   private next = 0
@@ -115,7 +172,7 @@ export class MemoryStore {
 
   static async open(
     embedder: Embedder,
-    opts: Partial<typeof config.seekdb> & { connectTimeoutMs?: number } = {},
+    opts: Partial<typeof config.seekdb> & { connectTimeoutMs?: number; reranker?: Reranker | null } = {},
   ): Promise<MemoryStore> {
     const c = { ...config.seekdb, ...opts }
     // seekdb ใช้เวลาบูตราวครึ่งนาที ถ้าเปิดพร้อมกันด้วย compose ต้องรอ ไม่ใช่ล้ม
@@ -151,7 +208,7 @@ export class MemoryStore {
       const rc = new SeekdbClient({ host: c.host, port: c.port, user: c.user, password: c.password, database: c.database })
       readers.push({ client: rc, col: await rc.getCollection({ name: c.collection, embeddingFunction: null }) })
     }
-    return new MemoryStore(client, col, embedder, await EntityRegistry.open(client), readers)
+    return new MemoryStore(client, col, embedder, await EntityRegistry.open(client), readers, opts.reranker ?? null, await UserRegistry.open(client), await BrainRegistry.open(client))
   }
 
   async close() {
@@ -161,6 +218,14 @@ export class MemoryStore {
 
   private liveWhere(container: string, now: number): Where {
     return { $and: [{ container }, { active: 1 }, { validUntil: { $gt: now } }] }
+  }
+
+  /**
+   * ความจำที่เป็นค่าปัจจุบัน ณ เวลา at: สร้างแล้ว ยังไม่หมดอายุ และยังไม่ถูกแทน (หรือถูกแทนหลังเวลานั้น)
+   * รุ่นที่ถูกแทนก่อนมีฟิลด์ invalidAt (ก่อนเพิ่มความสามารถนี้) จะไม่ถูกนับ
+   */
+  private asOfWhere(container: string, at: number): Where {
+    return { $and: [{ container }, { createdAt: { $lte: at } }, { validUntil: { $gt: at } }, { $or: [{ active: 1 }, { invalidAt: { $gt: at } }] }] } as Where
   }
 
   /**
@@ -199,7 +264,8 @@ export class MemoryStore {
         include: ['metadatas'],
       })
       for (let i = 0; i < old.ids.length; i++) {
-        const m = { ...(old.metadatas?.[i] as Meta), active: 0, supersededBy: id }
+        // invalidAt = เวลาที่รุ่นนี้เลิกเป็นค่าปัจจุบัน ใช้ตอบคำถามย้อนเวลา (asOf)
+        const m = { ...(old.metadatas?.[i] as Meta), active: 0, supersededBy: id, invalidAt: now }
         await this.col.update({ ids: old.ids[i]!, metadatas: m })
         action = 'superseded'
       }
@@ -249,12 +315,22 @@ export class MemoryStore {
   async search(
     container: string,
     q: string,
-    opts: { limit?: number; now?: number; tuning?: Partial<SearchTuning> } = {},
+    opts: {
+      limit?: number; now?: number; tuning?: Partial<SearchTuning>; rerank?: boolean; rerankTop?: number
+      /** ค้นเหมือนย้อนไปเวลานั้น (epoch ms) */
+      asOf?: number
+      /** รวมรุ่นที่ถูกแทนแล้วในผลค้น (ดูประวัติ) */
+      includeSuperseded?: boolean
+      /** แนบคะแนนแยกส่วนของแต่ละผล */
+      explain?: boolean
+    } = {},
   ): Promise<SearchResult> {
     const t = { ...config.search, ...opts.tuning }
-    const now = opts.now ?? Date.now()
+    const now = opts.asOf ?? opts.now ?? Date.now()
     const limit = opts.limit ?? 5
-    const where = this.liveWhere(container, now)
+    const where: Where = opts.asOf !== undefined
+      ? this.asOfWhere(container, opts.asOf)
+      : opts.includeSuperseded ? { $and: [{ container }, { validUntil: { $gt: now } }] } : this.liveWhere(container, now)
     const qTokens = tokenize(q)
 
     // ชื่อเฉพาะ: หาว่าคำค้นพูดถึงรายที่รู้จัก หรือรายที่ไม่เคยเห็น
@@ -283,17 +359,19 @@ export class MemoryStore {
     if (await unknownP) return { hits: [], abstained: true, reason: 'unknown_entity' }
     const [{ qVec, dense }, lex] = await Promise.all([denseP, lexP])
 
-    const cand = new Map<string, { meta: Meta; doc: string; sim: number }>()
+    // อันดับในแต่ละฝั่ง (1 = ดีที่สุด, 0 = ไม่อยู่ในฝั่งนั้น) ใช้รวมอันดับแบบ RRF
+    const cand = new Map<string, { meta: Meta; doc: string; sim: number; denseRank: number; lexRank: number }>()
     dense.ids[0]?.forEach((id, i) => {
       const d = dense.distances?.[0]?.[i]
-      cand.set(id, { meta: dense.metadatas?.[0]?.[i] as Meta, doc: dense.documents?.[0]?.[i] ?? '', sim: d == null ? 0 : 1 - d })
+      cand.set(id, { meta: dense.metadatas?.[0]?.[i] as Meta, doc: dense.documents?.[0]?.[i] ?? '', sim: d == null ? 0 : 1 - d, denseRank: i + 1, lexRank: 0 })
     })
     // ผู้สมัครที่มาจากฝั่งคำอย่างเดียว (ส่วนน้อย) ค่อยไปขอเวกเตอร์มาคิดความคล้าย
     const lexOnly: string[] = []
     lex?.ids[0]?.forEach((id, i) => {
-      if (cand.has(id)) return
+      const had = cand.get(id)
+      if (had) { had.lexRank = i + 1; return }
       lexOnly.push(id)
-      cand.set(id, { meta: lex.metadatas?.[0]?.[i] as Meta, doc: lex.documents?.[0]?.[i] ?? '', sim: 0 })
+      cand.set(id, { meta: lex.metadatas?.[0]?.[i] as Meta, doc: lex.documents?.[0]?.[i] ?? '', sim: 0, denseRank: 0, lexRank: i + 1 })
     })
     if (lexOnly.length) {
       const got = await this.reader().get({ ids: lexOnly, include: ['embeddings'] })
@@ -320,10 +398,34 @@ export class MemoryStore {
       const cov = coverage(qTokens, c.doc.split(' '))
       const simNorm = clamp01((c.sim - t.simFloor) / (t.simCeil - t.simFloor))
       // ความหมาย + คำที่ตรงกัน: ต้องมีอย่างใดอย่างหนึ่งชัดเจน หรือทั้งสองพอประมาณ จึงผ่านเกณฑ์
+      // คะแนนนี้ใช้ตัดสินว่า "รู้หรือไม่รู้" เสมอ ไม่ว่าจะเรียงลำดับด้วยวิธีใด
       const score = (1 - t.lexWeight) * simNorm + t.lexWeight * cov
-      hits.push({ ...toMemory(id, c.meta), score, sim: c.sim, coverage: cov })
+      const rrf = (c.denseRank ? 1 / (RRF_K + c.denseRank) : 0) + (c.lexRank ? 1 / (RRF_K + c.lexRank) : 0)
+      const mem = toMemory(id, c.meta)
+      const decay = recencyDecay(mem, now, t.eventHalfLifeDays)
+      const hit: SearchHit & { _rank: number } = { ...mem, score, sim: c.sim, coverage: cov, _rank: (t.fusion === 'rrf' ? rrf * RRF_SCALE : score) * decay }
+      if (opts.explain) hit.explain = { denseRank: c.denseRank, lexRank: c.lexRank, sim: round4(c.sim), simNorm: round4(simNorm), coverage: round4(cov), weighted: round4(score), rrf: round4(rrf * RRF_SCALE), decay: round4(decay), fusion: t.fusion }
+      hits.push(hit)
     }
-    hits.sort((a, b) => b.score - a.score || b.createdAt - a.createdAt)
+    // เรียงตามวิธีที่เลือก (weighted หรือ rrf) คูณการลดน้ำหนักตามอายุของความจำแบบเหตุการณ์
+    hits.sort((a, b) => (b as any)._rank - (a as any)._rank || b.createdAt - a.createdAt)
+    for (const h of hits) delete (h as any)._rank
+
+    // จัดอันดับซ้ำ: อ่านคำถามคู่กับข้อความจริงของผู้สมัครอันดับต้น แล้วผสมกับคะแนนเดิม
+    // ผู้สมัครที่ไม่ได้ส่งให้ reranker ถือว่าไม่ผ่าน และเกณฑ์ตัดใช้ rerankMinScore แทน minScore
+    if (this.reranker && opts.rerank !== false) {
+      const top = hits.slice(0, opts.rerankTop ?? config.rerank.top)
+      const rr = await this.reranker.score(q, top.map((h) => h.text))
+      const mixed = top.map((h, i) => {
+        const m: SearchHit = { ...h, rerank: rr[i]!, score: (1 - t.rerankWeight) * h.score + t.rerankWeight * rr[i]! }
+        if (m.explain) m.explain = { ...m.explain, rerank: round4(rr[i]!) }
+        return m
+      })
+      mixed.sort((a, b) => b.score - a.score || b.createdAt - a.createdAt)
+      const kept = mixed.filter((h) => h.score >= t.rerankMinScore).slice(0, limit)
+      return kept.length ? { hits: kept, abstained: false, reranked: true } : { hits: [], abstained: true, reason: 'no_match', reranked: true }
+    }
+
     const kept = hits.filter((h) => h.score >= t.minScore).slice(0, limit)
     return kept.length ? { hits: kept, abstained: false } : { hits: [], abstained: true, reason: 'no_match' }
   }
@@ -358,6 +460,33 @@ export class MemoryStore {
       keyed: all.filter((m) => m.kind !== 'preference' && m.subject),
       recent: all.filter((m) => m.kind !== 'preference' && !m.subject).slice(0, opts.limit ?? 10),
     }
+  }
+
+  /**
+   * บริบทตั้งต้นสำหรับผู้ช่วย AI ในคำขอเดียว ไม่ใช้ LLM:
+   *   current = ค่าปัจจุบันของทุกคีย์ (subject + attribute) ใหม่สุดก่อน
+   *   preferences = ความชอบ/ข้อกำหนดที่ยังใช้ได้
+   *   recent = ความจำที่เพิ่มหรือถูกพูดถึงซ้ำภายใน days วันล่าสุด (ไม่ซ้ำกับสองกลุ่มแรก)
+   */
+  async context(container: string, opts: { current?: number; preferences?: number; recent?: number; days?: number; now?: number } = {}) {
+    const now = opts.now ?? Date.now()
+    const days = Math.max(1, Math.min(3650, opts.days ?? 30))
+    const base: Where[] = [{ container }, { active: 1 }, { validUntil: { $gt: now } }]
+    const read = async (extra: Where[], limit: number) => {
+      const r = await this.reader().get({ where: { $and: [...base, ...extra] } as Where, include: ['metadatas'], limit })
+      return r.ids.map((id, i) => toMemory(id, r.metadatas?.[i] as Meta))
+    }
+    const [keyed, prefs, fresh] = await Promise.all([
+      read([{ subject: { $ne: '' } }, { attribute: { $ne: '' } }] as Where[], 5000),
+      read([{ kind: 'preference' }], 1000),
+      read([{ lastSeenAt: { $gte: now - days * 86_400_000 } }] as Where[], 5000),
+    ])
+    const newest = (a: Memory, b: Memory) => b.lastSeenAt - a.lastSeenAt || b.createdAt - a.createdAt
+    const current = keyed.sort(newest).slice(0, opts.current ?? 50)
+    const preferences = prefs.filter((m) => !(m.subject && m.attribute)).sort(newest).slice(0, opts.preferences ?? 30)
+    const seen = new Set([...current, ...preferences].map((m) => m.id))
+    const recent = fresh.filter((m) => !seen.has(m.id)).sort(newest).slice(0, opts.recent ?? 20)
+    return { current, preferences, recent, totals: { current: keyed.length, preferences: prefs.length, recent: fresh.length }, days }
   }
 
   /**
@@ -426,6 +555,116 @@ export class MemoryStore {
     return { nodes, edges }
   }
 
+  /**
+   * ความจำที่ยังใช้ได้ทั้งหมดของ subject เดียว เรียงตาม attribute: description ก่อน แล้ว p1, p2, ... ตามเลข
+   * ใช้ประกอบเอกสารที่ถูกตัดเป็นชิ้นกลับเป็นไฟล์เดิม
+   */
+  async bySubject(container: string, subject: string, now = Date.now()): Promise<Memory[]> {
+    const where: Where = { $and: [{ container }, { active: 1 }, { subject }, { validUntil: { $gt: now } }] }
+    const out: Memory[] = []
+    for (let offset = 0; ; offset += 1000) {
+      const r = await this.reader().get({ where, include: ['metadatas'], limit: 1000, offset })
+      r.ids.forEach((id, i) => out.push(toMemory(id, r.metadatas?.[i] as Meta)))
+      if (r.ids.length < 1000) break
+    }
+    const rank = (a: string) => (a === 'description' ? -1 : /^p\d+$/.test(a) ? Number(a.slice(1)) : Number.MAX_SAFE_INTEGER)
+    return out.sort((a, b) => rank(a.attribute) - rank(b.attribute) || a.attribute.localeCompare(b.attribute))
+  }
+
+  /** รายชื่อ subject ที่ขึ้นต้นด้วย prefix พร้อมจำนวนชิ้น และข้อความของ attribute "description" ถ้ามี */
+  async subjects(container: string, prefix = '', now = Date.now()) {
+    const by = new Map<string, { subject: string; count: number; description: string; source: string; updatedAt: number }>()
+    for (let offset = 0; ; offset += 1000) {
+      const r = await this.reader().get({ where: this.liveWhere(container, now), include: ['metadatas'], limit: 1000, offset })
+      r.ids.forEach((id, i) => {
+        const m = toMemory(id, r.metadatas?.[i] as Meta)
+        if (!m.subject || !m.subject.startsWith(prefix)) return
+        const e = by.get(m.subject) ?? { subject: m.subject, count: 0, description: '', source: m.source, updatedAt: 0 }
+        e.count++
+        e.updatedAt = Math.max(e.updatedAt, m.createdAt)
+        if (m.attribute === 'description') e.description = m.text
+        by.set(m.subject, e)
+      })
+      if (r.ids.length < 1000) break
+    }
+    return [...by.values()].sort((a, b) => a.subject.localeCompare(b.subject))
+  }
+
+  /**
+   * ตำแหน่ง 2 มิติของความจำที่ยังใช้ได้ "ทุกรายการ" ของ brain จาก PCA ของ embedding ทั้งชุด (graph() ใช้แค่ตัวอย่าง)
+   * เส้นเชื่อมเพื่อนบ้านคิดเฉพาะในตัวอย่างที่กระจายทั่วชุด ไม่เกิน edgeSample รายการ เพราะทั้งชุดเป็น O(n²)
+   */
+  async points(container: string, opts: { edgeSample?: number; neighbors?: number; now?: number } = {}) {
+    const where = this.liveWhere(container, opts.now ?? Date.now())
+    const metas: Memory[] = [], vecs: Float32Array[] = []
+    for (let offset = 0; ; offset += 1000) {
+      const r = await this.reader().get({ where, include: ['metadatas', 'embeddings'], limit: 1000, offset })
+      r.ids.forEach((id, i) => {
+        const v = r.embeddings?.[i]
+        if (!v || !v.length) return
+        metas.push(toMemory(id, r.metadatas?.[i] as Meta))
+        vecs.push(Float32Array.from(v))
+      })
+      if (r.ids.length < 1000) break
+    }
+    const n = metas.length, dim = vecs[0]?.length ?? 0
+    if (n < 2 || !dim) return { metas, xs: metas.map(() => 0), ys: metas.map(() => 0), edges: [] as [number, number, number][] }
+
+    const mean = new Float64Array(dim)
+    for (const v of vecs) for (let d = 0; d < dim; d++) mean[d]! += v[d]! / n
+    const project = (axis: Float64Array) => {
+      const out = new Float64Array(n)
+      for (let i = 0; i < n; i++) { const v = vecs[i]!; let s = 0; for (let d = 0; d < dim; d++) s += (v[d]! - mean[d]!) * axis[d]!; out[i] = s }
+      return out
+    }
+    // power iteration ลู่เข้าเร็ว: ชุดใหญ่ใช้รอบน้อยลงเพื่อให้คำนวณทั้งชุดได้ในไม่กี่วินาที
+    const rounds = n > 5000 ? 20 : 40
+    const component = (deflate?: Float64Array) => {
+      let axis = Float64Array.from({ length: dim }, (_, d) => Math.sin(d * 12.9898 + (deflate ? 1 : 0)))
+      for (let it = 0; it < rounds; it++) {
+        const scores = project(axis), next = new Float64Array(dim)
+        for (let i = 0; i < n; i++) { const v = vecs[i]!, s = scores[i]!; for (let d = 0; d < dim; d++) next[d]! += (v[d]! - mean[d]!) * s }
+        if (deflate) { let dot = 0; for (let d = 0; d < dim; d++) dot += next[d]! * deflate[d]!; for (let d = 0; d < dim; d++) next[d]! -= dot * deflate[d]! }
+        let len = 0; for (let d = 0; d < dim; d++) len += next[d]! * next[d]!
+        len = Math.sqrt(len) || 1
+        for (let d = 0; d < dim; d++) next[d]! /= len
+        axis = next
+      }
+      return axis
+    }
+    const a1 = component(), xs = project(a1), ys = project(component(a1))
+
+    // เพื่อนบ้านในตัวอย่างที่เลือกแบบเว้นระยะเท่ากัน (ไม่สุ่ม ผลจึงคงที่ระหว่างการคำนวณ)
+    const k = opts.neighbors ?? 2, s = Math.min(n, opts.edgeSample ?? 1200)
+    const sample = Array.from({ length: s }, (_, i) => Math.floor((i * n) / s))
+    const edges: [number, number, number][] = [], seen = new Set<string>()
+    for (const i of sample) {
+      const best: [number, number][] = [], vi = vecs[i]!
+      for (const j of sample) {
+        if (i === j) continue
+        const vj = vecs[j]!
+        let sim = 0
+        for (let d = 0; d < dim; d++) sim += vi[d]! * vj[d]!
+        if (best.length < k) { best.push([j, sim]); best.sort((p, q) => q[1] - p[1]) }
+        else if (sim > best[k - 1]![1]) { best[k - 1] = [j, sim]; best.sort((p, q) => q[1] - p[1]) }
+      }
+      for (const [j, sim] of best) {
+        const key = i < j ? `${i}-${j}` : `${j}-${i}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        edges.push([i, j, Math.round(sim * 1000) / 1000])
+      }
+    }
+    return { metas, xs: Array.from(xs), ys: Array.from(ys), edges }
+  }
+
+  /** ความจำหนึ่งรายการตาม id เฉพาะเมื่ออยู่ใน container ที่ระบุ */
+  async getOne(container: string, id: string): Promise<Memory | null> {
+    const r = await this.reader().get({ ids: id, include: ['metadatas'] })
+    const m = r.metadatas?.[0] as Meta | undefined
+    return r.ids.length && m && m.container === container ? toMemory(r.ids[0]!, m) : null
+  }
+
   /** ประวัติของคีย์หนึ่ง รวมรุ่นที่ถูกแทนแล้ว ใหม่สุดก่อน */
   async history(container: string, subject: string, attribute: string): Promise<Memory[]> {
     const r = await this.col.get({ where: { $and: [{ container }, { subject }, { attribute }] }, include: ['metadatas'] })
@@ -463,13 +702,61 @@ export class MemoryStore {
     return n
   }
 
+  /**
+   * สถิติของทุก brain ในรอบเดียว: อ่าน metadata ทั้ง collection แล้วนับในหน่วยความจำ
+   * การเขียนถูกนับจาก createdAt ของทุกรุ่น รวมรุ่นที่ถูกแทนแล้ว
+   */
+  async overview(now = Date.now()): Promise<BrainStats[]> {
+    const by = new Map<string, { s: BrainStats; sources: Set<string> }>()
+    const bump = (buckets: number[], age: number, size: number) => {
+      const i = Math.floor(age / size)
+      if (i >= 0 && i < buckets.length) buckets[buckets.length - 1 - i]!++
+    }
+    for (let offset = 0; ; offset += 1000) {
+      const r = await this.reader().get({ include: ['metadatas'], limit: 1000, offset })
+      r.ids.forEach((id, i) => {
+        const m = toMemory(id, r.metadatas?.[i] as Meta)
+        let e = by.get(m.container)
+        if (!e) {
+          const s: BrainStats = {
+            brain: m.container, live: 0, superseded: 0, expired: 0, expiringSoon: 0, kinds: { fact: 0, preference: 0, event: 0 },
+            keyed: 0, sources: 0, merges: 0, chars: 0, firstAt: m.createdAt, lastAt: m.createdAt,
+            minute: new Array(60).fill(0), hour: new Array(24).fill(0), day: new Array(30).fill(0),
+          }
+          by.set(m.container, (e = { s, sources: new Set() }))
+        }
+        const s = e.s
+        s.firstAt = Math.min(s.firstAt, m.createdAt)
+        s.lastAt = Math.max(s.lastAt, m.createdAt)
+        const age = now - m.createdAt
+        bump(s.minute, age, 60_000); bump(s.hour, age, 3_600_000); bump(s.day, age, 86_400_000)
+        if (!m.active) { s.superseded++; return }
+        if (m.validUntil && m.validUntil <= now) { s.expired++; return }
+        s.live++
+        if (m.validUntil && m.validUntil - now < 7 * 86_400_000) s.expiringSoon++
+        if (m.kind in s.kinds) s.kinds[m.kind]++
+        if (m.subject && m.attribute) s.keyed++
+        if (m.source) e.sources.add(m.source)
+        s.merges += Math.max(0, m.count - 1)
+        s.chars += m.text.length
+      })
+      if (r.ids.length < 1000) break
+    }
+    return [...by.values()].map(({ s, sources }) => ({ ...s, sources: sources.size })).sort((a, b) => b.live - a.live)
+  }
+
   /** ลบความจำทั้งหมดที่มาจากแหล่งเดียวกัน (รวมรุ่นเก่า) ใช้ก่อนนำเข้าไฟล์เดิมซ้ำ */
   async forgetSource(container: string, source: string) {
     await this.col.delete({ where: { $and: [{ container }, { source }] } })
   }
 
+  /** ลบทีละชุดตาม id: คำสั่งลบทั้ง brain ในครั้งเดียวหมดเวลาที่ฐานข้อมูลเมื่อมีหลายพันรายการ */
   async clear(container: string) {
     await this.entities.clear(container)
-    await this.col.delete({ where: { container } })
+    for (;;) {
+      const r = await this.col.get({ where: { container }, include: [], limit: 500 })
+      if (!r.ids.length) break
+      await this.col.delete({ ids: [...r.ids] })
+    }
   }
 }

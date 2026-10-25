@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>panya · ผู้ใช้</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="/assets/ui.css?v=1">
+<script src="/assets/ui.js?v=1"></script>
+<style>
+  form.add { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 12px; align-items: end; }
+  .cell-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+  .cell-brains { display: flex; gap: 6px; min-width: 220px; }
+  .cell-brains input { min-height: 36px; padding: 4px 10px; }
+  .table select { min-height: 36px; padding: 4px 8px; width: auto; }
+  /* จอแคบ: ตารางเป็นการ์ดทีละคน */
+  @media (max-width: 760px) {
+    .table thead { display: none; }
+    .table, .table tbody, .table tr, .table td { display: block; width: 100%; }
+    .table tr { border-bottom: 1px solid var(--line); padding: 10px 0; }
+    .table td { border: 0; padding: 6px 12px; }
+    .table td[data-label]::before { content: attr(data-label); display: block; font-size: 12px; color: var(--muted); font-weight: 600; }
+    .cell-actions { justify-content: flex-start; }
+    .cell-brains { min-width: 0; }
+  }
+</style>
+</head>
+<body>
+<header class="app-header"></header>
+<main id="main" class="page">
+  <div class="page-head"><div><h1 data-i18n="title"></h1><p class="muted" data-i18n="lead"></p></div></div>
+  <div class="stack">
+    <section class="card" aria-labelledby="h-add">
+      <h2 id="h-add" data-i18n="addTitle"></h2>
+      <form class="add" id="add" novalidate>
+        <label class="field"><span data-i18n="user"></span><input id="nu" autocomplete="off" autocapitalize="none" spellcheck="false" required></label>
+        <label class="field"><span data-i18n="role"></span><select id="nr"><option value="member"></option><option value="viewer"></option><option value="admin"></option></select></label>
+        <label class="field"><span data-i18n="brains"></span><input id="nb" data-i18n-ph="brainsPh"></label>
+        <button class="btn primary" type="submit" data-i18n="add"></button>
+      </form>
+      <p class="muted small" style="margin:12px 0 0" data-i18n="roleHelp"></p>
+      <div id="secret" class="secret-box" hidden style="margin-top:12px"></div>
+    </section>
+    <section class="card" aria-labelledby="h-list">
+      <div class="card-head"><h2 id="h-list" data-i18n="listTitle"></h2><span class="grow"></span><span class="badge" id="count"></span></div>
+      <p id="msg" role="status" class="small" style="margin:0 0 8px"></p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th data-i18n="user"></th><th data-i18n="role"></th><th data-i18n="brains"></th><th data-i18n="status"></th><th data-i18n="lastLogin"></th><th><span class="sr-only" data-i18n="actions"></span></th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table></div>
+    </section>
+  </div>
+</main>
+<script>
+const UI = PanyaUI
+const L = {
+  th: {
+    title: 'ผู้ใช้', lead: 'เพิ่มผู้ใช้ กำหนดบทบาท และสมองที่อนุญาตให้อ่าน',
+    addTitle: 'เพิ่มผู้ใช้', listTitle: 'ผู้ใช้ทั้งหมด', user: 'ชื่อผู้ใช้', role: 'บทบาท', brains: 'สมองที่อนุญาตให้อ่าน', brainsPh: 'คั่นด้วย , หรือ * = ทุกสมอง', add: 'เพิ่มผู้ใช้',
+    status: 'สถานะ', lastLogin: 'เข้าล่าสุด', never: 'ยังไม่เคย', active: 'ใช้งาน', disabled: 'ระงับ', actions: 'การทำงาน',
+    admin: 'admin · จัดการทุกอย่าง', member: 'member · สร้างสมองของตัวเอง', viewer: 'viewer · ดูและค้นเท่านั้น',
+    roleHelp: 'admin เข้าได้ทุกสมองและจัดการผู้ใช้ · member สร้างและเขียนสมองของตัวเอง อ่านสมองที่อนุญาตหรือที่ได้รับแชร์ · viewer ดูและค้นได้อย่างเดียว · ระบบสุ่มรหัสผ่านให้และแสดงครั้งเดียว',
+    reset: 'รีเซ็ตรหัส', disable: 'ระงับ', enable: 'เปิดใช้', remove: 'ลบ', save: 'บันทึก',
+    newPass: (u) => `รหัสผ่านของ ${u} (แสดงครั้งเดียว ส่งให้เจ้าของทางช่องทางที่ปลอดภัย)`, copy: 'คัดลอก', copied: 'คัดลอกแล้ว',
+    confirmRemove: (u) => `ลบผู้ใช้ ${u}? กู้คืนไม่ได้ API key ของผู้ใช้นี้จะใช้ไม่ได้ทันที`, confirmReset: (u) => `สุ่มรหัสใหม่ให้ ${u}? ผู้ใช้นั้นจะถูกออกจากระบบทุกเครื่อง`,
+    saved: 'บันทึกแล้ว', notAdmin: 'หน้านี้สำหรับ admin เท่านั้น', you: 'คุณ',
+  },
+  en: {
+    title: 'Users', lead: 'Add users, set their role, and the brains they may read',
+    addTitle: 'Add a user', listTitle: 'All users', user: 'Username', role: 'Role', brains: 'Brains allowed to read', brainsPh: 'comma separated, * = all brains', add: 'Add user',
+    status: 'Status', lastLogin: 'Last sign-in', never: 'never', active: 'active', disabled: 'disabled', actions: 'Actions',
+    admin: 'admin · manages everything', member: 'member · creates own brains', viewer: 'viewer · view and search only',
+    roleHelp: 'admin uses every brain and manages users · member creates and writes own brains, reads allowed or shared ones · viewer can only view and search · a random password is generated and shown once',
+    reset: 'Reset password', disable: 'Disable', enable: 'Enable', remove: 'Delete', save: 'Save',
+    newPass: (u) => `Password for ${u} (shown once, send it to the owner over a safe channel)`, copy: 'Copy', copied: 'Copied',
+    confirmRemove: (u) => `Delete user ${u}? This cannot be undone and their API keys stop working.`, confirmReset: (u) => `Generate a new password for ${u}? They will be signed out everywhere.`,
+    saved: 'Saved', notAdmin: 'This page is for admins only', you: 'you',
+  },
+}
+const t = (k, ...a) => UI.t(L, k, ...a)
+const $ = (id) => document.getElementById(id)
+const me = window.PANYA_USER || null
+let list = []
+UI.header('/users')
+
+const say = (text, err = false) => { $('msg').textContent = text; $('msg').style.color = err ? 'var(--crit)' : 'var(--good)' }
+const showSecret = (user, password) => {
+  $('secret').hidden = false
+  $('secret').innerHTML = `<span style="flex-basis:100%">${UI.esc(t('newPass', user))}</span><code>${UI.esc(password)}</code><button class="btn sm" type="button" id="copy-pw">${t('copy')}</button>`
+  $('copy-pw').onclick = async (ev) => { try { await navigator.clipboard.writeText(password); ev.target.textContent = t('copied') } catch {} }
+}
+const parseBrains = (s) => s.split(',').map((x) => x.trim()).filter(Boolean)
+const when = (ms) => (ms ? new Date(ms).toLocaleString(UI.lang === 'th' ? 'th-TH' : 'en-GB', { dateStyle: 'medium', timeStyle: 'short' }) : t('never'))
+
+function render() {
+  document.title = 'panya · ' + t('title')
+  UI.apply(L)
+  for (const o of $('nr').options) o.textContent = t(o.value)
+  $('count').textContent = list.length
+  $('rows').innerHTML = list.map((u) => `
+    <tr data-u="${UI.esc(u.username)}">
+      <td data-label="${t('user')}"><strong>${UI.esc(u.username)}</strong>${me && me.username === u.username ? ` <span class="badge brand">${t('you')}</span>` : ''}</td>
+      <td data-label="${t('role')}"><select data-act="role" aria-label="${t('role')}">${['admin', 'member', 'viewer'].map((r) => `<option value="${r}"${r === u.role ? ' selected' : ''}>${r}</option>`).join('')}</select></td>
+      <td data-label="${t('brains')}"><div class="cell-brains"><input data-act="brains" aria-label="${t('brains')}" value="${UI.esc(u.role === 'admin' ? '*' : u.brains.join(', '))}"${u.role === 'admin' ? ' disabled' : ''}>${u.role === 'admin' ? '' : `<button class="btn sm" data-act="save">${t('save')}</button>`}</div></td>
+      <td data-label="${t('status')}"><span class="badge ${u.disabled ? 'crit' : 'good'}">${t(u.disabled ? 'disabled' : 'active')}</span></td>
+      <td data-label="${t('lastLogin')}" class="small">${when(u.lastLoginAt)}</td>
+      <td><div class="cell-actions">
+        <button class="btn sm" data-act="reset">${t('reset')}</button>
+        <button class="btn sm" data-act="toggle">${t(u.disabled ? 'enable' : 'disable')}</button>
+        <button class="btn sm danger" data-act="remove">${t('remove')}</button>
+      </div></td>
+    </tr>`).join('')
+}
+
+async function load() {
+  try { list = (await UI.api('GET', '/v1/users')).users; render() } catch (e) { say(e.message === 'admin only' ? t('notAdmin') : e.message, true) }
+}
+
+$('rows').addEventListener('click', async (ev) => {
+  const btn = ev.target.closest('button'); if (!btn) return
+  const tr = btn.closest('tr'), name = tr.dataset.u, u = list.find((x) => x.username === name)
+  const path = `/v1/users/${encodeURIComponent(name)}`
+  try {
+    if (btn.dataset.act === 'save') await UI.api('PATCH', path, { brains: parseBrains(tr.querySelector('[data-act=brains]').value) })
+    else if (btn.dataset.act === 'toggle') await UI.api('PATCH', path, { disabled: !u.disabled })
+    else if (btn.dataset.act === 'reset') { if (!confirm(t('confirmReset', name))) return; showSecret(name, (await UI.api('PATCH', path, { resetPassword: true })).password) }
+    else if (btn.dataset.act === 'remove') { if (!confirm(t('confirmRemove', name))) return; await UI.api('DELETE', path) }
+    else return
+    say(t('saved')); await load()
+  } catch (e) { say(e.message, true) }
+})
+$('rows').addEventListener('change', async (ev) => {
+  if (ev.target.dataset.act !== 'role') return
+  const name = ev.target.closest('tr').dataset.u
+  try { await UI.api('PATCH', `/v1/users/${encodeURIComponent(name)}`, { role: ev.target.value }); say(t('saved')) } catch (e) { say(e.message, true) }
+  await load()
+})
+$('add').addEventListener('submit', async (ev) => {
+  ev.preventDefault()
+  const username = $('nu').value.trim().toLowerCase(), role = $('nr').value
+  try {
+    const r = await UI.api('POST', '/v1/users', { username, role, brains: role === 'admin' ? ['*'] : parseBrains($('nb').value) })
+    showSecret(r.user.username, r.password); $('nu').value = ''; $('nb').value = ''
+    say(t('saved')); await load()
+  } catch (e) { say(e.message, true) }
+})
+document.addEventListener('panya:lang', render)
+render(); load()
+</script>
+</body>
+</html>
