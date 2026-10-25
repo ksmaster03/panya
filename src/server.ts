@@ -119,17 +119,17 @@ export function createApp(
     if (fails.size > 10_000) fails.delete(fails.keys().next().value!)
   }
 
-  const page = (file: string) => async (c: Context<Env>) => {
+  // kind: legacy = หน้าสามมิติเดิม (เพิ่ม account.js ให้มีชื่อผู้ใช้/ออกจากระบบ) · app = หน้าใหม่ที่ต้องล็อกอินเสมอ
+  //       public = เปิดได้ทุกคน (landing) แต่ถ้าล็อกอินอยู่จะรู้ว่าเป็นใคร
+  const page = (file: string, kind: 'legacy' | 'app' | 'public' = 'legacy') => async (c: Context<Env>) => {
     let html = await Bun.file(new URL(file, import.meta.url)).text()
-    if (users.loginRequired) {
-      const s = await sessionOf(c)
-      if (s) {
-        const me = JSON.stringify({ username: s.user.username, role: s.user.role, brains: s.user.brains }).replace(/</g, '\\u003c')
-        html = html.replace('</head>', `<script>window.PANYA_USER=${me}</script><script src="/assets/account.js"></script></head>`)
-      } else if (!(file === './dashboard.html' && publicAllowed(c))) {
-        const u = new URL(c.req.url)
-        return c.redirect('/login?next=' + encodeURIComponent(u.pathname + u.search))
-      }
+    const s = users.loginRequired || kind !== 'legacy' ? await sessionOf(c) : null
+    if (s) {
+      const me = JSON.stringify({ username: s.user.username, role: s.user.role, brains: s.user.brains }).replace(/</g, '\\u003c')
+      html = html.replace('</head>', `<script>window.PANYA_USER=${me}</script>${kind === 'legacy' ? '<script src="/assets/account.js"></script>' : ''}</head>`)
+    } else if (kind === 'app' || (kind === 'legacy' && users.loginRequired && !(file === './dashboard.html' && publicAllowed(c)))) {
+      const u = new URL(c.req.url)
+      return c.redirect('/login?next=' + encodeURIComponent(u.pathname + u.search))
     }
     c.header('cache-control', 'no-store')
     return c.html(html)
@@ -197,13 +197,19 @@ export function createApp(
   // คลังสินค้าสามมิติ: โซน = brain, ชั้นวาง = หมวด, กล่อง = ความจำ · ข้อมูลมาจาก /v1/overview, /v1/points, /v1/events
   app.get('/warehouse', page('./warehouse.html'))
   // หน้าจัดการผู้ใช้ (admin) · ข้อมูลมาจาก /v1/users
-  app.get('/users', page('./users.html'))
+  app.get('/users', page('./users.html', 'app'))
+  // หน้าแรก: แนะนำระบบ วิธีใช้ API และกฎความปลอดภัย
+  app.get('/', page('./landing.html', 'public'))
+  // บัญชี: เปลี่ยนรหัสผ่าน, API key ของตัวเอง, ตัวอย่างการเรียก API
+  app.get('/account', page('./account.html', 'app'))
+  // สมองของฉัน: สร้าง แชร์ เพิ่มความจำ ลบ
+  app.get('/brains', page('./brains.html', 'app'))
 
   // ไฟล์เสียงประกอบของหน้าแดชบอร์ด: เฉพาะไฟล์ใน src/assets และเฉพาะชื่อที่เป็นตัวพิมพ์เล็ก ตัวเลข ขีดกลาง
   // รองรับ Range เพื่อให้เบราว์เซอร์เลื่อนตำแหน่งเพลงและเล่นวนได้
-  const AUDIO = { mp3: 'audio/mpeg', ogg: 'audio/ogg', wav: 'audio/wav', js: 'text/javascript; charset=utf-8' } as const
+  const AUDIO = { mp3: 'audio/mpeg', ogg: 'audio/ogg', wav: 'audio/wav', js: 'text/javascript; charset=utf-8', css: 'text/css; charset=utf-8', svg: 'image/svg+xml' } as const
   app.get('/assets/:file', async (c) => {
-    const m = c.req.param('file').match(/^[a-z0-9-]+\.(mp3|ogg|wav|js)$/)
+    const m = c.req.param('file').match(/^[a-z0-9-]+\.(mp3|ogg|wav|js|css|svg)$/)
     if (!m) return c.notFound()
     const file = Bun.file(new URL('./assets/' + m[0], import.meta.url))
     if (!(await file.exists())) return c.notFound()

@@ -5,62 +5,69 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex">
 <title>panya · เข้าสู่ระบบ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="/assets/ui.css?v=1">
+<script src="/assets/ui.js?v=1"></script>
 <style>
-  :root {
-    color-scheme: dark;
-    --bg: #030814; --bg2: #0a1a38; --ink: #e8eef9; --ink2: #c3cfe6; --muted: #9db0d0;
-    --line: rgba(110, 170, 255, .22); --panel: rgba(8, 20, 44, .78); --field: rgba(6, 16, 36, .78); --cyan: #7fe3ff; --crit: #ff8a8a;
-    --tap: 44px;
-  }
-  * { box-sizing: border-box; }
-  html, body { min-height: 100%; margin: 0; }
-  body {
-    display: grid; place-items: center; min-height: 100vh; padding: 16px;
-    background: radial-gradient(900px 600px at 50% 10%, var(--bg2), var(--bg) 70%) fixed; background-color: var(--bg);
-    color: var(--ink); font-family: "Leelawadee UI", "Noto Sans Thai", Sarabun, Tahoma, system-ui, sans-serif; line-height: 1.7;
-  }
-  form { display: flex; flex-direction: column; gap: 10px; width: min(380px, 100%); padding: 24px; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); box-shadow: 0 0 60px rgba(57, 135, 229, .18); }
-  h1 { margin: 0; font-size: 22px; font-weight: 600; }
-  h1 b { color: var(--cyan); font-weight: 600; text-shadow: 0 0 14px rgba(127, 227, 255, .7); }
-  p { margin: 0; color: var(--muted); font-size: 14px; }
-  label { font-size: 14px; color: var(--ink2); }
-  input, button { font: inherit; color: var(--ink); background: var(--field); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; min-height: var(--tap); width: 100%; }
-  input:focus, button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 1px; }
-  button { cursor: pointer; margin-top: 6px; background: linear-gradient(180deg, rgb(34, 104, 190), rgb(24, 78, 152)); border-color: rgba(127, 227, 255, .5); }
-  button:disabled { opacity: .6; cursor: progress; }
-  #err { color: var(--crit); min-height: 1.7em; }
-  .top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  #lang { width: auto; margin: 0; min-height: 36px; padding: 2px 12px; background: var(--field); font-size: 14px; }
+  body { min-height: 100vh; display: flex; flex-direction: column; background: radial-gradient(900px 520px at 85% -10%, color-mix(in srgb, var(--brand) 18%, transparent), transparent 70%), radial-gradient(700px 480px at -10% 110%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 70%), var(--bg); }
+  .wrap { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 440px); gap: 48px; align-items: center; max-width: 1100px; width: 100%; margin: 0 auto; padding: 32px 16px; }
+  .pitch h1 { font-size: clamp(28px, 3.6vw, 40px); }
+  .pitch p { color: var(--ink-2); font-size: 17px; max-width: 46ch; }
+  .pitch ul { list-style: none; padding: 0; margin: 20px 0 0; display: grid; gap: 10px; color: var(--ink-2); }
+  .pitch li { display: flex; gap: 10px; align-items: flex-start; }
+  .pitch li svg { flex: none; width: 22px; height: 22px; color: var(--accent); margin-top: 3px; }
+  form.card { padding: 28px; display: grid; gap: 14px; }
+  form.card h2 { margin: 0; font-size: 22px; }
+  #err { color: var(--crit); min-height: 1.6em; margin: 0; font-size: 15px; }
+  .pw-wrap { position: relative; }
+  .pw-wrap input { padding-right: 74px; }
+  .pw-wrap button { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); min-height: 34px; }
+  @media (max-width: 860px) { .wrap { grid-template-columns: 1fr; gap: 24px; } .pitch ul { display: none; } .pitch { text-align: center; } .pitch p { margin-inline: auto; } }
 </style>
 </head>
 <body>
-<form id="f" novalidate>
-  <div class="top"><h1><b>panya</b></h1><button id="lang" type="button"></button></div>
-  <p data-i18n="help"></p>
-  <label for="u" data-i18n="user"></label>
-  <input id="u" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus>
-  <label for="p" data-i18n="pass"></label>
-  <input id="p" name="password" type="password" autocomplete="current-password" required>
-  <button id="go" type="submit" data-i18n="signIn"></button>
-  <p id="err" role="alert"></p>
-</form>
+<header class="app-header"></header>
+<main id="main" class="wrap">
+  <section class="pitch">
+    <h1 data-i18n="headline"></h1>
+    <p data-i18n="sub"></p>
+    <ul>
+      <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span data-i18n="p1"></span></li>
+      <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span data-i18n="p2"></span></li>
+      <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span data-i18n="p3"></span></li>
+    </ul>
+  </section>
+  <form id="f" class="card" novalidate>
+    <h2 data-i18n="signIn"></h2>
+    <p class="muted small" style="margin:0" data-i18n="help"></p>
+    <label class="field" for="u"><span data-i18n="user"></span><input id="u" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus></label>
+    <label class="field" for="p"><span data-i18n="pass"></span>
+      <span class="pw-wrap"><input id="p" name="password" type="password" autocomplete="current-password" required><button class="btn sm ghost" type="button" id="show" aria-controls="p" aria-pressed="false"></button></span></label>
+    <button class="btn primary" id="go" type="submit" data-i18n="signIn"></button>
+    <p id="err" role="alert"></p>
+    <p class="muted small" style="margin:0" data-i18n="forgot"></p>
+  </form>
+</main>
 <script>
+const UI = PanyaUI
 const L = {
-  th: { title: 'panya · เข้าสู่ระบบ', help: 'เข้าสู่ระบบด้วยชื่อผู้ใช้และรหัสผ่านที่ผู้ดูแลให้ไว้', user: 'ชื่อผู้ใช้', pass: 'รหัสผ่าน', signIn: 'เข้าสู่ระบบ', signingIn: 'กำลังเข้าสู่ระบบ…', other: 'EN',
-        empty: 'กรอกชื่อผู้ใช้และรหัสผ่าน', wrong: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง', locked: 'ลองผิดหลายครั้งเกินไป รอ 15 นาทีแล้วลองใหม่', down: 'ติดต่อเซิร์ฟเวอร์ไม่ได้ ลองใหม่อีกครั้ง' },
-  en: { title: 'panya · Sign in', help: 'Sign in with the username and password your administrator gave you.', user: 'Username', pass: 'Password', signIn: 'Sign in', signingIn: 'Signing in…', other: 'ไทย',
-        empty: 'Enter your username and password', wrong: 'Wrong username or password', locked: 'Too many attempts. Wait 15 minutes and try again.', down: 'Could not reach the server. Try again.' },
+  th: { title: 'panya · เข้าสู่ระบบ', headline: 'สมองที่สองของทีม', sub: 'เก็บความรู้ตามจริง ค้นเจอทั้งไทยและอังกฤษ และบอกตรง ๆ เมื่อไม่รู้',
+        p1: 'เก็บข้อความตามจริง ไม่แต่งเติม', p2: 'สมองของแต่ละคน แชร์ให้อ่านได้', p3: 'ปฏิเสธรหัสผ่านและ key อัตโนมัติ',
+        signIn: 'เข้าสู่ระบบ', signingIn: 'กำลังเข้าสู่ระบบ…', help: 'ใช้ชื่อผู้ใช้และรหัสผ่านที่ผู้ดูแลให้ไว้', user: 'ชื่อผู้ใช้', pass: 'รหัสผ่าน', show: 'แสดง', hide: 'ซ่อน',
+        forgot: 'ลืมรหัสผ่าน ติดต่อผู้ดูแลระบบเพื่อรีเซ็ต', empty: 'กรอกชื่อผู้ใช้และรหัสผ่าน', wrong: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง', locked: 'ลองผิดหลายครั้งเกินไป รอ 15 นาทีแล้วลองใหม่', down: 'ติดต่อเซิร์ฟเวอร์ไม่ได้ ลองใหม่อีกครั้ง' },
+  en: { title: 'panya · Sign in', headline: 'Your team’s second brain', sub: 'Keep knowledge word for word, find it in Thai or English, and get an honest “I don’t know” when it isn’t there.',
+        p1: 'Stores text verbatim, never rewritten', p2: 'Personal brains you can share read-only', p3: 'Passwords and keys are refused automatically',
+        signIn: 'Sign in', signingIn: 'Signing in…', help: 'Use the username and password your administrator gave you.', user: 'Username', pass: 'Password', show: 'Show', hide: 'Hide',
+        forgot: 'Forgot your password? Ask an administrator to reset it.', empty: 'Enter your username and password', wrong: 'Wrong username or password', locked: 'Too many attempts. Wait 15 minutes and try again.', down: 'Could not reach the server. Try again.' },
 }
-let lang = (() => { try { return localStorage.getItem('panya.lang') } catch { return null } })() || ((navigator.language || 'th').toLowerCase().startsWith('th') ? 'th' : 'en')
+const t = (k) => UI.t(L, k)
 const $ = (id) => document.getElementById(id)
-const t = (k) => L[lang][k]
-function applyLang() {
-  document.documentElement.lang = lang; document.title = t('title')
-  for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.dataset.i18n)
-  $('lang').textContent = t('other'); $('err').textContent = ''
-}
-$('lang').addEventListener('click', () => { lang = lang === 'th' ? 'en' : 'th'; try { localStorage.setItem('panya.lang', lang) } catch {}; applyLang() })
-applyLang()
+UI.header('/login')
+const paint = () => { document.title = t('title'); UI.apply(L); $('show').textContent = t($('p').type === 'password' ? 'show' : 'hide'); $('err').textContent = '' }
+document.addEventListener('panya:lang', paint)
+paint()
+$('show').addEventListener('click', () => { const on = $('p').type === 'password'; $('p').type = on ? 'text' : 'password'; $('show').setAttribute('aria-pressed', String(on)); $('show').textContent = t(on ? 'hide' : 'show') })
 
 // กลับไปหน้าที่ขอไว้ เฉพาะ path ภายในเว็บนี้
 const next = (() => { const n = new URLSearchParams(location.search).get('next') || ''; return /^\/(?!\/)[^\\]*$/.test(n) ? n : '/dashboard' })()

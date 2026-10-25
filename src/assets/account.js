@@ -4,7 +4,7 @@
   const me = window.PANYA_USER
   if (!me) return
   const th = () => (document.documentElement.lang || 'th').startsWith('th')
-  const text = () => (th() ? { out: 'ออกจากระบบ', users: 'ผู้ใช้' } : { out: 'Sign out', users: 'Users' })
+  const text = () => (th() ? { out: 'ออกจากระบบ', users: 'ผู้ใช้', brains: 'สมองของฉัน', account: 'บัญชีและ API' } : { out: 'Sign out', users: 'Users', brains: 'My brains', account: 'Account & API' })
 
   // session หมดอายุหรือถูกระงับ: คำขอ /v1 ตอบ 401 → ไปหน้าล็อกอินแล้วกลับมาหน้านี้
   const fetch0 = window.fetch.bind(window)
@@ -24,8 +24,11 @@
   const mount = () => {
     const header = document.querySelector('header')
     const nav = document.querySelector('header .nav')
-    if (nav && me.role === 'admin' && !nav.querySelector('a[href="/users"]')) {
-      const a = document.createElement('a'); a.href = '/users'; a.dataset.panyaUsers = '1'; nav.appendChild(a)
+    // ลิงก์หน้าใหม่: สมองของฉัน, บัญชีและ API, ผู้ใช้ (admin)
+    const extra = [['/brains', 'brains'], ['/account', 'account'], ...(me.role === 'admin' ? [['/users', 'users']] : [])]
+    for (const [href, key] of extra) {
+      if (!nav || nav.querySelector(`a[href="${href}"]`)) continue
+      const a = document.createElement('a'); a.href = href; a.dataset.panyaLink = key; nav.appendChild(a)
     }
     if (!header || header.querySelector('.panya-me')) return
     const box = document.createElement('span'); box.className = 'panya-me'
@@ -35,7 +38,7 @@
     box.append(name, out); header.appendChild(box)
     const paint = () => {
       const s = text(); out.textContent = s.out
-      const link = nav && nav.querySelector('a[data-panya-users]'); if (link) link.textContent = s.users
+      if (nav) for (const a of nav.querySelectorAll('a[data-panya-link]')) a.textContent = s[a.dataset.panyaLink]
     }
     paint()
     // หน้าเปลี่ยนภาษาด้วยการแก้ <html lang> จึงวาดข้อความใหม่ตาม

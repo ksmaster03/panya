@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>panya · บัญชีและ API</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="/assets/ui.css?v=1">
+<script src="/assets/ui.js?v=1"></script>
+<style>
+  .pw-meter { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+  .pw-meter i { display: block; height: 100%; width: 0; background: var(--crit); transition: width .2s, background .2s; }
+  .key-name { font-weight: 600; }
+  .copy-row { position: relative; }
+  .copy-row .btn { position: absolute; top: 8px; right: 8px; }
+  .copy-row pre { padding-right: 96px; }
+  .profile dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; }
+  .profile dt { color: var(--muted); }
+  .profile dd { margin: 0; font-weight: 600; }
+</style>
+</head>
+<body>
+<header class="app-header"></header>
+<main id="main" class="page narrow">
+  <div class="page-head"><div><h1 data-i18n="title"></h1><p class="muted" data-i18n="lead"></p></div></div>
+
+  <div class="stack">
+    <section class="card profile" aria-labelledby="h-profile">
+      <h2 id="h-profile" data-i18n="profile"></h2>
+      <dl><dt data-i18n="username"></dt><dd id="p-user"></dd><dt data-i18n="role"></dt><dd id="p-role"></dd><dt data-i18n="access"></dt><dd id="p-access" class="small"></dd></dl>
+    </section>
+
+    <section class="card" aria-labelledby="h-pw">
+      <h2 id="h-pw" data-i18n="pwTitle"></h2>
+      <p class="muted small" data-i18n="pwLead"></p>
+      <form id="pw" class="stack" novalidate>
+        <input type="text" name="username" autocomplete="username" hidden>
+        <label class="field"><span data-i18n="pwCurrent"></span><input id="pw-cur" type="password" autocomplete="current-password" required></label>
+        <label class="field"><span data-i18n="pwNew"></span><input id="pw-new" type="password" autocomplete="new-password" minlength="10" required aria-describedby="pw-hint"><div class="pw-meter" aria-hidden="true"><i id="pw-bar"></i></div><span class="hint" id="pw-hint" data-i18n="pwHint"></span></label>
+        <label class="field"><span data-i18n="pwConfirm"></span><input id="pw-again" type="password" autocomplete="new-password" required></label>
+        <p id="pw-msg" role="alert" class="small" style="margin:0"></p>
+        <div class="row"><button class="btn primary" type="submit" data-i18n="pwSave"></button></div>
+      </form>
+    </section>
+
+    <section class="card" aria-labelledby="h-keys">
+      <div class="card-head"><h2 id="h-keys" data-i18n="keysTitle"></h2><span class="grow"></span><span class="badge" id="key-count"></span></div>
+      <p class="muted small" data-i18n="keysLead"></p>
+      <form id="new-key" class="row" novalidate>
+        <label class="sr-only" for="key-name" data-i18n="keyName"></label>
+        <input id="key-name" maxlength="64" data-i18n-ph="keyNamePh" style="flex:1 1 220px">
+        <button class="btn primary" type="submit" data-i18n="keyCreate"></button>
+      </form>
+      <div id="key-new" class="stack" hidden style="margin-top:12px">
+        <div class="notice warn"><span data-i18n="keyOnce"></span></div>
+        <div class="secret-box"><code id="key-value"></code><button class="btn sm" type="button" id="key-copy" data-i18n="copy"></button></div>
+      </div>
+      <div class="table-wrap" style="margin-top:14px">
+        <table class="table"><thead><tr><th data-i18n="keyName"></th><th data-i18n="keyPrefix"></th><th data-i18n="created"></th><th data-i18n="lastUsed"></th><th><span class="sr-only" data-i18n="actions"></span></th></tr></thead>
+        <tbody id="keys"></tbody></table>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="h-api">
+      <h2 id="h-api" data-i18n="apiTitle"></h2>
+      <p class="muted small" data-i18n-html="apiLead"></p>
+      <div class="tabs" role="tablist" id="tabs">
+        <button role="tab" aria-selected="true" data-tab="save" data-i18n="tabSave"></button>
+        <button role="tab" aria-selected="false" data-tab="search" data-i18n="tabSearch"></button>
+        <button role="tab" aria-selected="false" data-tab="batch" data-i18n="tabBatch"></button>
+        <button role="tab" aria-selected="false" data-tab="list" data-i18n="tabList"></button>
+        <button role="tab" aria-selected="false" data-tab="claude" data-i18n="tabClaude"></button>
+      </div>
+      <div class="copy-row"><pre><code id="snippet"></code></pre><button class="btn sm" type="button" id="snip-copy" data-i18n="copy"></button></div>
+      <p class="muted small" id="snip-note"></p>
+      <div class="notice"><span data-i18n="rule"></span></div>
+    </section>
+  </div>
+</main>
+<script>
+const UI = PanyaUI
+const L = {
+  th: {
+    title: 'บัญชีและ API', lead: 'เปลี่ยนรหัสผ่าน สร้าง API key ของคุณ และดูตัวอย่างการเรียกใช้', profile: 'ข้อมูลบัญชี', username: 'ชื่อผู้ใช้', role: 'บทบาท', access: 'สิทธิ์',
+    roleAdmin: 'admin: จัดการได้ทุกสมองและผู้ใช้', roleMember: 'member: สร้างและเขียนสมองของตัวเอง อ่านสมองที่ได้รับแชร์', roleViewer: 'viewer: ดูและค้นได้อย่างเดียว',
+    pwTitle: 'เปลี่ยนรหัสผ่าน', pwLead: 'เปลี่ยนแล้ว เครื่องอื่นที่ล็อกอินค้างไว้จะถูกออกจากระบบ เครื่องนี้ใช้ต่อได้', pwCurrent: 'รหัสผ่านปัจจุบัน', pwNew: 'รหัสผ่านใหม่', pwConfirm: 'ยืนยันรหัสผ่านใหม่',
+    pwHint: 'อย่างน้อย 10 ตัว ผสมตัวพิมพ์ใหญ่ เล็ก ตัวเลข หรือสัญลักษณ์ ยิ่งยาวยิ่งดี', pwSave: 'เปลี่ยนรหัสผ่าน', pwSaving: 'กำลังบันทึก…',
+    pwShort: 'รหัสผ่านใหม่ต้องยาวอย่างน้อย 10 ตัว', pwMismatch: 'รหัสผ่านใหม่ทั้งสองช่องไม่ตรงกัน', pwSame: 'รหัสผ่านใหม่ต้องไม่ซ้ำกับรหัสเดิม', pwWrong: 'รหัสผ่านปัจจุบันไม่ถูกต้อง', pwLocked: 'ลองผิดหลายครั้งเกินไป รอ 15 นาที', pwDone: 'เปลี่ยนรหัสผ่านแล้ว',
+    keysTitle: 'API key ของคุณ', keysLead: 'ใช้ key กับโปรแกรม สคริปต์ หรือ Claude Code แทนรหัสผ่าน key มีสิทธิ์เท่ากับบัญชีนี้ ตั้งชื่อตามเครื่องหรือโปรแกรมที่ใช้ เพื่อยกเลิกทีละตัวได้',
+    keyName: 'ชื่อ key', keyNamePh: 'เช่น laptop, claude-code, n8n', keyCreate: 'สร้าง key', keyPrefix: 'รหัสขึ้นต้น', created: 'สร้างเมื่อ', lastUsed: 'ใช้ล่าสุด', never: 'ยังไม่เคยใช้', actions: 'การทำงาน',
+    keyOnce: 'คัดลอก key ตอนนี้และเก็บไว้ในที่ปลอดภัย ระบบเก็บไว้แบบเข้ารหัสทางเดียว จะไม่แสดงซ้ำอีก ถ้าหายให้ยกเลิกแล้วสร้างใหม่',
+    copy: 'คัดลอก', copied: 'คัดลอกแล้ว', revoke: 'ยกเลิก', revokeAsk: (n) => `ยกเลิก key "${n}"? โปรแกรมที่ใช้ key นี้จะเรียก API ไม่ได้ทันที`, revoked: 'ยกเลิก key แล้ว', keyNeedName: 'ตั้งชื่อ key ก่อน', noKeys: 'ยังไม่มี key',
+    apiTitle: 'เริ่มใช้ API', apiLead: 'ส่ง key ในหัว <code>Authorization: Bearer pnu_…</code> ทุกคำขอ · ตัวอย่างด้านล่างใช้สมองแรกของคุณ สร้างสมองได้ที่หน้า <a href="/brains">สมองของฉัน</a>',
+    tabSave: 'บันทึก', tabSearch: 'ค้น', tabBatch: 'บันทึกเป็นชุด', tabList: 'ดูสมอง', tabClaude: 'Claude Code',
+    noteSave: 'subject + attribute เดียวกัน = ค่าใหม่แทนค่าเก่า ข้อความยาวได้ไม่เกิน 2,000 ตัว ต่อหนึ่งเรื่อง',
+    noteSearch: 'abstained: true แปลว่าไม่มีความจำที่เกี่ยวพอ ให้ถือว่า "ไม่รู้" อย่าเดาคำตอบ',
+    noteBatch: 'ส่งได้ครั้งละไม่เกิน 200 รายการ ถ้ามีรายการผิดรูปแบบหรือมีความลับ จะไม่บันทึกทั้งชุด',
+    noteList: 'คืนสมองที่คุณอ่านได้ พร้อม access: owner (เขียนได้) หรือ read (อ่านอย่างเดียว)',
+    noteClaude: 'ให้ Claude Code เก็บและค้นความจำเอง: ตั้งค่าตัวแปรนี้ แล้วใช้ skill panya-memory',
+    rule: 'กฎสำคัญ: ห้ามส่งรหัสผ่าน key token หรือข้อมูลลับเข้า panya ระบบจะปฏิเสธอัตโนมัติ และเขียนได้เฉพาะสมองที่คุณเป็นเจ้าของ',
+    yourKey: 'pnu_your_key_here',
+  },
+  en: {
+    title: 'Account & API', lead: 'Change your password, create your own API keys and see how to call the API', profile: 'Account', username: 'Username', role: 'Role', access: 'Access',
+    roleAdmin: 'admin: manages every brain and user', roleMember: 'member: creates and writes own brains, reads shared ones', roleViewer: 'viewer: view and search only',
+    pwTitle: 'Change password', pwLead: 'Other devices that are signed in will be signed out. This one stays signed in.', pwCurrent: 'Current password', pwNew: 'New password', pwConfirm: 'Confirm new password',
+    pwHint: 'At least 10 characters. Mix upper and lower case, digits or symbols; longer is better.', pwSave: 'Change password', pwSaving: 'Saving…',
+    pwShort: 'The new password must be at least 10 characters', pwMismatch: 'The two new passwords do not match', pwSame: 'The new password must differ from the current one', pwWrong: 'The current password is wrong', pwLocked: 'Too many attempts. Wait 15 minutes.', pwDone: 'Password changed',
+    keysTitle: 'Your API keys', keysLead: 'Use a key in programs, scripts or Claude Code instead of your password. A key has the same rights as this account. Name it after the device or tool so you can revoke one at a time.',
+    keyName: 'Key name', keyNamePh: 'e.g. laptop, claude-code, n8n', keyCreate: 'Create key', keyPrefix: 'Starts with', created: 'Created', lastUsed: 'Last used', never: 'never', actions: 'Actions',
+    keyOnce: 'Copy the key now and keep it somewhere safe. It is stored as a one-way hash and will not be shown again. If you lose it, revoke it and create a new one.',
+    copy: 'Copy', copied: 'Copied', revoke: 'Revoke', revokeAsk: (n) => `Revoke key "${n}"? Programs using it will stop working immediately.`, revoked: 'Key revoked', keyNeedName: 'Give the key a name first', noKeys: 'No keys yet',
+    apiTitle: 'Start using the API', apiLead: 'Send the key in the <code>Authorization: Bearer pnu_…</code> header on every request. The examples use your first brain; create one on <a href="/brains">My brains</a>.',
+    tabSave: 'Save', tabSearch: 'Search', tabBatch: 'Save many', tabList: 'List brains', tabClaude: 'Claude Code',
+    noteSave: 'Same subject + attribute = the new value replaces the old one. Up to 2,000 characters per memory, one fact each.',
+    noteSearch: 'abstained: true means nothing relevant was found. Treat it as "unknown"; do not guess.',
+    noteBatch: 'Up to 200 memories per request. If any item is invalid or contains a secret, nothing is saved.',
+    noteList: 'Returns the brains you can read, with access: owner (writable) or read (read-only).',
+    noteClaude: 'Let Claude Code store and search memories itself: set these variables, then use the panya-memory skill.',
+    rule: 'Important: never send passwords, keys, tokens or other secrets to panya. They are refused automatically, and you can only write to brains you own.',
+    yourKey: 'pnu_your_key_here',
+  },
+}
+const t = (k, ...a) => UI.t(L, k, ...a)
+const me = window.PANYA_USER || { username: '', role: 'viewer', brains: [] }
+const base = location.origin
+let keys = [], brains = [], tab = 'save', lastKey = ''
+
+UI.header('/account')
+
+function render() {
+  document.title = 'panya · ' + t('title')
+  UI.apply(L)
+  $('p-user').textContent = me.username
+  $('p-role').textContent = me.role
+  $('p-access').textContent = t({ admin: 'roleAdmin', member: 'roleMember', viewer: 'roleViewer' }[me.role] || 'roleViewer')
+  renderKeys(); renderSnippet()
+  $('new-key').hidden = me.role === 'viewer' && false
+}
+function $(id) { return document.getElementById(id) }
+const when = (ms) => (ms ? new Date(ms).toLocaleString(UI.lang === 'th' ? 'th-TH' : 'en-GB', { dateStyle: 'medium', timeStyle: 'short' }) : t('never'))
+
+function renderKeys() {
+  $('key-count').textContent = `${keys.length} / 10`
+  $('keys').innerHTML = keys.length
+    ? keys.map((k) => `<tr><td class="key-name">${UI.esc(k.name)}</td><td><code>${UI.esc(k.prefix)}</code></td><td class="small">${when(k.createdAt)}</td><td class="small">${when(k.lastUsedAt)}</td>
+        <td style="text-align:right"><button class="btn sm danger" data-revoke="${UI.esc(k.id)}" data-name="${UI.esc(k.name)}">${t('revoke')}</button></td></tr>`).join('')
+    : `<tr><td colspan="5" class="empty">${t('noKeys')}</td></tr>`
+}
+
+function renderSnippet() {
+  const brain = (brains.find((b) => b.access === 'owner') || brains[0] || { name: 'my-notes' }).name
+  const key = lastKey || t('yourKey')
+  const H = `-H "Authorization: Bearer ${key}" -H "Content-Type: application/json"`
+  const S = {
+    save: `curl -X POST ${base}/v1/memories \\\n  ${H} \\\n  -d '{"brain":"${brain}","text":"ประชุมทีมทุกวันจันทร์ 10 โมง","subject":"meeting:weekly","attribute":"time"}'`,
+    search: `curl -X POST ${base}/v1/search \\\n  ${H} \\\n  -d '{"brain":"${brain}","q":"ประชุมทีมวันไหน","limit":5}'\n\n# → {"hits":[{"text":"ประชุมทีมทุกวันจันทร์ 10 โมง","score":0.93,...}],"abstained":false}`,
+    batch: `curl -X POST ${base}/v1/memories/batch \\\n  ${H} \\\n  -d '{"brain":"${brain}","memories":[\n        {"text":"ลูกค้า A ส่งของทุกวันพุธ","subject":"customer:A","attribute":"delivery"},\n        {"text":"คลัง 2 ปิดปรับปรุงถึงสิ้นเดือน"}\n      ]}'`,
+    list: `curl ${base}/v1/brains -H "Authorization: Bearer ${key}"`,
+    claude: `# ~/.claude/panya.json\n{ "url": "${base}", "key": "${key}", "brain": "${brain}" }\n\n# หรือ / or\nexport PANYA_URL=${base}\nexport PANYA_KEY=${key}`,
+  }
+  $('snippet').textContent = S[tab]
+  $('snip-note').textContent = t({ save: 'noteSave', search: 'noteSearch', batch: 'noteBatch', list: 'noteList', claude: 'noteClaude' }[tab])
+  for (const b of $('tabs').querySelectorAll('button')) b.setAttribute('aria-selected', String(b.dataset.tab === tab))
+}
+
+async function copy(text, btn) {
+  try { await navigator.clipboard.writeText(text); const o = btn.textContent; btn.textContent = t('copied'); setTimeout(() => (btn.textContent = o), 1500) }
+  catch { UI.toast(text) }
+}
+
+// ── password ──────────────────────────────────────────────────────
+const strength = (pw) => [pw.length >= 10, pw.length >= 14, /[a-z]/.test(pw) && /[A-Z]/.test(pw), /\d/.test(pw), /[^A-Za-z0-9]/.test(pw)].filter(Boolean).length
+$('pw-new').addEventListener('input', () => {
+  const s = strength($('pw-new').value), bar = $('pw-bar')
+  bar.style.width = (s / 5) * 100 + '%'
+  bar.style.background = s <= 2 ? 'var(--crit)' : s <= 3 ? 'var(--warn)' : 'var(--good)'
+})
+$('pw').addEventListener('submit', async (ev) => {
+  ev.preventDefault()
+  const cur = $('pw-cur').value, next = $('pw-new').value, again = $('pw-again').value, msg = $('pw-msg')
+  msg.style.color = 'var(--crit)'
+  if (next.length < 10) return (msg.textContent = t('pwShort'))
+  if (next !== again) return (msg.textContent = t('pwMismatch'))
+  if (next === cur) return (msg.textContent = t('pwSame'))
+  const btn = ev.submitter || $('pw').querySelector('button'); btn.disabled = true; btn.textContent = t('pwSaving'); msg.textContent = ''
+  try {
+    await UI.api('POST', '/auth/password', { current: cur, next })
+    $('pw').reset(); $('pw-bar').style.width = '0'
+    msg.style.color = 'var(--good)'; msg.textContent = t('pwDone'); UI.toast(t('pwDone'))
+  } catch (e) { msg.textContent = e.status === 401 ? t('pwWrong') : e.status === 429 ? t('pwLocked') : e.message }
+  finally { btn.disabled = false; btn.textContent = t('pwSave') }
+})
+
+// ── keys ──────────────────────────────────────────────────────────
+async function loadKeys() { try { keys = (await UI.api('GET', '/v1/keys')).keys; renderKeys() } catch (e) { UI.toast(e.message, true) } }
+$('new-key').addEventListener('submit', async (ev) => {
+  ev.preventDefault()
+  const name = $('key-name').value.trim()
+  if (!name) { UI.toast(t('keyNeedName'), true); $('key-name').focus(); return }
+  try {
+    const r = await UI.api('POST', '/v1/keys', { name })
+    lastKey = r.key; $('key-value').textContent = r.key; $('key-new').hidden = false; $('key-name').value = ''
+    await loadKeys(); renderSnippet()
+  } catch (e) { UI.toast(e.message, true) }
+})
+$('key-copy').addEventListener('click', (ev) => copy($('key-value').textContent, ev.currentTarget))
+$('keys').addEventListener('click', async (ev) => {
+  const b = ev.target.closest('[data-revoke]'); if (!b) return
+  if (!confirm(t('revokeAsk', b.dataset.name))) return
+  try { await UI.api('DELETE', '/v1/keys/' + encodeURIComponent(b.dataset.revoke)); UI.toast(t('revoked')); await loadKeys() } catch (e) { UI.toast(e.message, true) }
+})
+
+// ── snippets ──────────────────────────────────────────────────────
+$('tabs').addEventListener('click', (ev) => { const b = ev.target.closest('[data-tab]'); if (b) { tab = b.dataset.tab; renderSnippet() } })
+$('snip-copy').addEventListener('click', (ev) => copy($('snippet').textContent, ev.currentTarget))
+
+document.addEventListener('panya:lang', render)
+render(); loadKeys()
+UI.api('GET', '/v1/brains').then((r) => { brains = r.brains; renderSnippet() }).catch(() => {})
+</script>
+</body>
+</html>

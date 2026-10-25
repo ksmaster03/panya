@@ -1,0 +1,53 @@
+/* โหมดสว่างของหน้าสามมิติ (แดชบอร์ด, สมอง, คลังสินค้า)
+   ส่วนหัว แผง ตาราง กราฟ เป็นโทนสว่าง · เวทีสามมิติยังคงเป็นพื้นมืด (เหมือนจอภาพที่ฝังในหน้า) เพื่อให้จุดเรืองแสงอ่านออก */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f5f7fb; --bg2: #e7eefa; --surface: #ffffff; --ink: #0f1b2d; --ink2: #33445e; --muted: #5d6b82;
+  --line: #d5deeb; --grid: rgba(15, 27, 45, .08); --axis: rgba(15, 27, 45, .28);
+  --panel: #ffffff; --field: #ffffff; --cyan: #0b63c5; --accent: #b86a00;
+  --in: #2f6fd0; --abstain: #c2481b; --out: #0f8a60;
+  --good: #11865a; --warn: #a15c00; --crit: #c42b2b;
+}
+:root[data-theme="light"] body { background: var(--bg) !important; }
+:root[data-theme="light"] header { background: rgba(255, 255, 255, .92) !important; border-bottom-color: var(--line) !important; }
+:root[data-theme="light"] h1 b { color: #0b63c5 !important; text-shadow: none !important; }
+:root[data-theme="light"] .nav { border-color: var(--line); }
+:root[data-theme="light"] .nav a { color: var(--ink2); }
+:root[data-theme="light"] .nav a:hover { background: #eef3fb; color: var(--ink); }
+:root[data-theme="light"] .nav a[aria-current="page"] { background: #e3ecff; color: #0b4fa8; }
+:root[data-theme="light"] button, :root[data-theme="light"] input, :root[data-theme="light"] select { background: #ffffff; color: var(--ink); border-color: #c3cfdf; }
+:root[data-theme="light"] button:hover { background: #eef3fb; box-shadow: none; }
+:root[data-theme="light"] button.primary { background: #2563eb; border-color: #2563eb; color: #ffffff; }
+:root[data-theme="light"] input::placeholder { color: #7a879b; }
+:root[data-theme="light"] .panel, :root[data-theme="light"] .kpi { box-shadow: 0 1px 2px rgba(15, 27, 45, .05), 0 6px 18px rgba(15, 27, 45, .05); }
+:root[data-theme="light"] .chips button[aria-pressed="true"], :root[data-theme="light"] .tabs button[aria-pressed="true"] { background: #e3ecff; border-color: #2563eb; color: #0b4fa8; }
+:root[data-theme="light"] tbody tr:hover { background: #f2f6fc; }
+:root[data-theme="light"] tbody tr.on td { background: #e3ecff; }
+:root[data-theme="light"] #tt { background: #ffffff; color: var(--ink); border-color: var(--line); box-shadow: 0 10px 30px rgba(15, 27, 45, .15); }
+:root[data-theme="light"] #gate { background: rgba(245, 247, 251, .92); }
+:root[data-theme="light"] #gate form { background: #ffffff; border-color: var(--line); box-shadow: 0 18px 50px rgba(15, 27, 45, .14); }
+:root[data-theme="light"] #player { background: rgba(255, 255, 255, .95); border-color: var(--line); }
+:root[data-theme="light"] .panya-me { color: var(--muted); }
+
+/* เวทีสามมิติ: ใช้ค่าสีโหมดมืดภายในกรอบนี้ */
+:root[data-theme="light"] #stage, :root[data-theme="light"] .stage-dark {
+  --ink: #e8eef9; --ink2: #c3cfe6; --muted: #9db0d0; --line: rgba(110, 170, 255, .22); --panel: rgba(8, 20, 44, .62); --field: rgba(6, 16, 36, .78); --cyan: #7fe3ff;
+  color: var(--ink); background-color: #050c1c;
+}
+:root[data-theme="light"] #stage button, :root[data-theme="light"] .stage-dark button { background: rgba(28, 74, 140, .55); color: #e8eef9; border-color: rgba(110, 170, 255, .3); }
+
+/* ปุ่มสลับธีม (ใส่โดยสคริปต์ของหน้า) */
+.theme-btn { min-width: 44px; display: inline-grid; place-items: center; }
+.theme-btn svg { width: 18px; height: 18px; }
+
+/* เมนูหัวหน้าบนจอแคบ (ทั้งสองธีม): เลื่อนแนวนอนได้ ไม่ดันหน้าให้ล้น */
+header .nav { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+header .nav::-webkit-scrollbar { display: none; }
+header .nav a { flex: none; }
+@media (max-width: 700px) { header .nav { order: 10; width: 100%; } header .nav a { padding: 0 10px; } }
+
+/* แดชบอร์ด: การ์ดเหตุการณ์สดและแถบเสียง */
+:root[data-theme="light"] .ev { background: #f7f9fd; border-color: var(--line); }
+:root[data-theme="light"] .ev .dir b { filter: none; }
+:root[data-theme="light"] #kpis .kpi, :root[data-theme="light"] .panel { border-color: var(--line); }
+:root[data-theme="light"] #feed li { background: #f2f5fa; }
