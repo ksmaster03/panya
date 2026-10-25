@@ -1,10 +1,11 @@
 import { Hono, type Context } from 'hono'
 import { getConnInfo } from 'hono/bun'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
-import { config } from './config'
+import { config, type SearchTuning } from './config'
 import type { Memory, MemoryStore, RememberInput } from './memory'
-import { MIN_PASSWORD, ROLES, USERNAME, randomPassword, type Role, type User } from './users'
+import { MIN_PASSWORD, ROLES, USERNAME, randomPassword, type KeyLimits, type Role, type User } from './users'
 import { findSecret } from './secrets'
+import { mountMcp } from './mcp'
 
 /** ข้อความเมื่อพบความลับ ผู้เรียก (คนหรือโปรแกรม) ต้องเอาความลับออกแล้วส่งใหม่ */
 export const SECRET_REFUSED = 'refused: looks like a password, key or token. panya never stores secrets; remove it and send again'
@@ -12,7 +13,7 @@ export const SECRET_REFUSED = 'refused: looks like a password, key or token. pan
 // scope = brain ที่เข้าได้ (null = ทุก brain) · user = ผู้ใช้ที่ล็อกอินด้วยรหัสผ่าน (ไม่มีเมื่อใช้ API key)
 // wscope = brain ที่เขียน/ลบได้ (null = ทุก brain) แยกจาก scope ที่อ่านได้ เพราะสมองที่ได้รับแชร์อ่านได้อย่างเดียว
 // viaKey = ผู้ใช้เรียกด้วย API key ของตัวเอง (ไม่ใช่ cookie) · จัดการ key และรหัสผ่านได้เฉพาะทาง cookie
-type Env = { Variables: { scope: Set<string> | null; wscope: Set<string> | null; viewer?: boolean; user?: User; viaKey?: boolean } }
+type Env = { Variables: { scope: Set<string> | null; wscope: Set<string> | null; viewer?: boolean; user?: User; viaKey?: boolean; keyLimits?: KeyLimits } }
 
 /** ชื่อ cookie ของ session ผู้ใช้ */
 export const SESSION_COOKIE = 'panya_session'
@@ -324,13 +325,27 @@ export function createApp(
         c.set('scope', u.brains.includes('*') ? null : new Set([...own, ...shared, ...u.brains]))
         c.set('wscope', new Set(u.role === 'member' ? own : []))
       }
+      // ขอบเขตของ key ตัดสิทธิ์ของเจ้าของให้แคบลง ไม่เคยขยาย
+      const lim = c.get('keyLimits')
+      if (lim) {
+        const narrow = (s: Set<string> | null) => (lim.brains === null ? s : new Set(lim.brains.filter((b) => s === null || s.has(b))))
+        c.set('scope', narrow(c.get('scope')))
+        c.set('wscope', lim.mode === 'read' ? new Set() : narrow(c.get('wscope')))
+      }
       c.set('user', u)
       return next()
     }
     if (token.startsWith('pnu_')) {
-      const u = await users.userForKey(token)
-      if (u) { c.set('viaKey', true); return asUser(u) }
-      return c.json({ error: 'unauthorized' }, 401)
+      const found = await users.userForKey(token)
+      if (!found) return c.json({ error: 'unauthorized' }, 401)
+      const { user, limits } = found
+      c.set('viaKey', true)
+      // key แบบจำกัด: อ่านอย่างเดียว หรือเฉพาะบางสมอง → สร้างสมองไม่ได้ และเขียนได้ไม่เกินขอบเขตของ key
+      const limited = limits.mode === 'read' || limits.brains !== null
+      if (limited && c.req.method !== 'GET' && (c.req.path === '/v1/brains' || c.req.path.startsWith('/v1/keys'))) return c.json({ error: 'this API key is limited; it cannot create brains or keys' }, 403)
+      if (limits.mode === 'read' && c.req.method !== 'GET' && c.req.path !== '/v1/search') return c.json({ error: 'read-only API key' }, 403)
+      c.set('keyLimits', limits)
+      return asUser(user)
     }
     if (!token) {
       const s = await sessionOf(c)
@@ -431,10 +446,22 @@ export function createApp(
     if (b.q.length > 1000) return c.json({ error: 'q too long (max 1000)' }, 400)
     const limit = Math.max(1, Math.min(20, Number(b.limit) || 5))
     // minScore ให้ผู้เรียกปรับความเข้มของการไม่ตอบได้ ถ้าเนื้อหาต่างจากที่เกณฑ์ตั้งต้นถูกปรับมา
-    const tuning = typeof b.minScore === 'number' && b.minScore >= 0 && b.minScore <= 1 ? { minScore: b.minScore } : undefined
+    const tuning: Partial<SearchTuning> = {}
+    if (typeof b.minScore === 'number' && b.minScore >= 0 && b.minScore <= 1) tuning.minScore = b.minScore
+    // fusion: วิธีเรียงผล weighted (ค่าเริ่มต้น วัดแล้วแม่นกว่าเล็กน้อย) หรือ rrf
+    if (b.fusion !== undefined) { if (b.fusion !== 'weighted' && b.fusion !== 'rrf') return c.json({ error: 'fusion must be weighted or rrf' }, 400); tuning.fusion = b.fusion }
+    // asOf: ค้นเหมือนย้อนไป ณ เวลานั้น (epoch ms หรือ ISO 8601)
+    let asOf: number | undefined
+    if (b.asOf !== undefined && b.asOf !== null) {
+      asOf = typeof b.asOf === 'number' ? b.asOf : Date.parse(b.asOf)
+      if (!Number.isFinite(asOf)) return c.json({ error: 'invalid asOf (epoch ms or ISO 8601)' }, 400)
+    }
     const t0 = performance.now()
     // rerank: false = ข้าม reranker สำหรับคำขอนี้ (เมื่อผู้เรียกต้องการความเร็วมากกว่าความแม่น)
-    const r = await store.search(brain, b.q, { limit, tuning, rerank: b.rerank === false ? false : undefined })
+    const r = await store.search(brain, b.q, {
+      limit, tuning, rerank: b.rerank === false ? false : undefined, asOf,
+      includeSuperseded: b.includeSuperseded === true, explain: b.explain === true,
+    })
     const ms = Math.round(performance.now() - t0)
     recordSearch(brain, ms, r.abstained)
     emit({ type: 'out', brain, n: r.hits.length, text: snip(b.q), hits: r.hits.length, abstained: r.abstained, reason: r.reason, ms })
@@ -517,6 +544,32 @@ export function createApp(
     if (!brain) return c.json(denied, 403)
     const p = await store.profile(brain)
     return c.json({ preferences: p.preferences.map(present), keyed: p.keyed.map(present), recent: p.recent.map(present) })
+  })
+
+  // บริบทตั้งต้นสำหรับผู้ช่วย AI: ค่าปัจจุบันของทุกคีย์ + ความชอบ + ความจำล่าสุด ในคำขอเดียว
+  // format=text คืนเป็นข้อความพร้อมใส่ใน prompt
+  app.get('/v1/context', async (c) => {
+    const brain = brainOf(c.get('scope'), c.req.query('brain'), c.req.query('container'))
+    if (!brain) return c.json(denied, 403)
+    const int = (k: string, def: number, max: number) => Math.max(0, Math.min(max, Number(c.req.query(k) ?? def) || 0))
+    const ctx = await store.context(brain, { current: int('current', 50, 500), preferences: int('preferences', 30, 300), recent: int('recent', 20, 200), days: int('days', 30, 3650) || 30 })
+    if (c.req.query('format') === 'text') {
+      const day = (ms: number) => new Date(ms).toISOString().slice(0, 10)
+      const key = (m: Memory) => (m.subject && m.attribute ? `${m.subject} · ${m.attribute}: ` : '')
+      const sec = (title: string, list: Memory[]) => (list.length ? `## ${title}\n${list.map((m) => `- ${key(m)}${m.text} (${day(m.lastSeenAt)})`).join('\n')}\n` : '')
+      const text = [`# panya context: ${brain}`, sec('Current facts', ctx.current), sec('Preferences', ctx.preferences), sec(`Recent (last ${ctx.days} days)`, ctx.recent)].filter(Boolean).join('\n')
+      return c.text(ctx.current.length + ctx.preferences.length + ctx.recent.length ? text : `# panya context: ${brain}\n(no memories yet)`)
+    }
+    return c.json({ brain, days: ctx.days, totals: ctx.totals, current: ctx.current.map(present), preferences: ctx.preferences.map(present), recent: ctx.recent.map(present) })
+  })
+
+  // ประวัติของคีย์หนึ่ง (subject + attribute) รวมรุ่นที่ถูกแทนแล้ว ใหม่สุดก่อน
+  app.get('/v1/history', async (c) => {
+    const brain = brainOf(c.get('scope'), c.req.query('brain'), c.req.query('container'))
+    if (!brain) return c.json(denied, 403)
+    const subject = c.req.query('subject') ?? '', attribute = c.req.query('attribute') ?? ''
+    if (!subject || !attribute || subject.length > 191 || attribute.length > 191) return c.json({ error: 'subject and attribute are required (max 191)' }, 400)
+    return c.json({ brain, subject, attribute, versions: (await store.history(brain, subject, attribute)).map(present) })
   })
 
   app.get('/v1/stats', async (c) => {
@@ -763,7 +816,23 @@ export function createApp(
     const name = typeof b?.name === 'string' ? b.name.trim() : ''
     if (!name || name.length > 64) return c.json({ error: 'name is required (max 64), e.g. "laptop" or "claude-code"' }, 400)
     if ((await users.listKeys(u.username)).length >= 10) return c.json({ error: 'key limit reached (10 per user); revoke one first' }, 409)
-    const { key, info } = await users.createKey(u.username, name)
+    // ขอบเขต (ไม่บังคับ): brains = เฉพาะสมองเหล่านี้ · mode = read|write · expiresInDays = 1-365
+    let brains: string[] | null = null
+    if (b.brains !== undefined && b.brains !== null) {
+      if (!Array.isArray(b.brains) || !b.brains.length || b.brains.length > 50 || !b.brains.every((x: unknown) => typeof x === 'string' && BRAIN_NAME.test(x))) return c.json({ error: 'brains must be a non-empty list of brain names' }, 400)
+      const scope = c.get('scope')
+      const outside = b.brains.filter((x: string) => scope !== null && !scope.has(x))
+      if (outside.length) return c.json({ error: `you cannot read: ${outside.join(', ')}` }, 403)
+      brains = [...new Set<string>(b.brains)]
+    }
+    if (b.mode !== undefined && b.mode !== 'read' && b.mode !== 'write') return c.json({ error: 'mode must be read or write' }, 400)
+    let expiresAt = 0
+    if (b.expiresInDays !== undefined && b.expiresInDays !== null && b.expiresInDays !== 0) {
+      const d = Number(b.expiresInDays)
+      if (!Number.isInteger(d) || d < 1 || d > 365) return c.json({ error: 'expiresInDays must be 1-365 (or omit for no expiry)' }, 400)
+      expiresAt = Date.now() + d * 86_400_000
+    }
+    const { key, info } = await users.createKey(u.username, name, { brains, mode: b.mode ?? 'write', expiresAt })
     console.log(`[panya] api key ${info.id} created by ${u.username}`)
     return c.json({ key, ...info }, 201)
   })
@@ -847,6 +916,9 @@ export function createApp(
     await store.brains.forgetUser(name)
     return c.json({ ok: true })
   })
+
+  // MCP: Claude และเครื่องมืออื่นเรียก panya เป็น tool ได้ตรง ๆ (ใช้ API key เดียวกับ /v1)
+  mountMcp(app)
 
   app.onError((err, c) => {
     console.error('[panya]', err)

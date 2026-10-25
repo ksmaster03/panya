@@ -470,6 +470,9 @@
               <tr><td><span class="method m-post">POST</span></td><td><code>/v1/memories/batch</code></td><td data-i18n="r2">บันทึกหลายรายการ สูงสุด 200 รายการต่อคำขอ</td></tr>
               <tr><td><span class="method m-post">POST</span></td><td><code>/v1/search</code></td><td data-i18n="r3">ค้นหา ได้ข้อความเดิมพร้อมคะแนน หรือ abstained เมื่อไม่รู้</td></tr>
               <tr><td><span class="method m-get">GET</span></td><td><code>/v1/brains</code></td><td data-i18n="r4">ดูรายชื่อสมองที่คุณเป็นเจ้าของหรือได้รับแชร์</td></tr>
+              <tr><td><span class="method m-get">GET</span></td><td><code>/v1/context?brain=…</code></td><td data-i18n="r7">บริบทตั้งต้น: ค่าปัจจุบันของทุกคีย์ ความชอบ และความจำล่าสุด</td></tr>
+              <tr><td><span class="method m-get">GET</span></td><td><code>/v1/history?brain=…&amp;subject=…&amp;attribute=…</code></td><td data-i18n="r8">ทุกรุ่นของคีย์หนึ่ง รวมค่าที่ถูกแทนแล้ว</td></tr>
+              <tr><td><span class="method m-post">POST</span></td><td><code>/mcp</code></td><td data-i18n="r9">MCP server สำหรับ Claude Code และเครื่องมือที่รองรับ MCP</td></tr>
               <tr><td><span class="method m-get">GET</span></td><td><code>/v1/export?brain=…</code></td><td data-i18n="r5">ส่งออกความจำทั้งหมดของสมอง</td></tr>
               <tr><td><span class="method m-del">DELETE</span></td><td><code>/v1/memories/:id?brain=…</code></td><td data-i18n="r6">ลบความจำหนึ่งรายการ</td></tr>
             </tbody>
@@ -619,7 +622,7 @@
       authLine: 'ทุกคำขอต้องมีส่วนหัว', refTitle: 'รายการ endpoint หลัก',
       thMethod: 'เมธอด', thPath: 'เส้นทาง', thPurpose: 'ใช้ทำอะไร',
       r1: 'บันทึกความจำหนึ่งรายการ', r2: 'บันทึกหลายรายการ สูงสุด 200 รายการต่อคำขอ', r3: 'ค้นหา ได้ข้อความเดิมพร้อมคะแนน หรือ abstained เมื่อไม่รู้',
-      r4: 'ดูรายชื่อสมองที่คุณเป็นเจ้าของหรือได้รับแชร์', r5: 'ส่งออกความจำทั้งหมดของสมอง', r6: 'ลบความจำหนึ่งรายการ',
+      r4: 'ดูรายชื่อสมองที่คุณเป็นเจ้าของหรือได้รับแชร์', r5: 'ส่งออกความจำทั้งหมดของสมอง', r6: 'ลบความจำหนึ่งรายการ', r7: 'บริบทตั้งต้น: ค่าปัจจุบันของทุกคีย์ ความชอบ และความจำล่าสุด', r8: 'ทุกรุ่นของคีย์หนึ่ง รวมค่าที่ถูกแทนแล้ว', r9: 'MCP server สำหรับ Claude Code และเครื่องมือที่รองรับ MCP',
       refNote: 'ข้อความแต่ละรายการยาวได้ไม่เกิน 2,000 ตัวอักษร',
 
       secEyebrow: 'ความปลอดภัย', secTitle: 'ปลอดภัยตั้งแต่การออกแบบ', secSub: 'กติกาเหล่านี้บังคับที่เซิร์ฟเวอร์ ไม่ได้ขึ้นอยู่กับว่าผู้ใช้จะระวังแค่ไหน',
@@ -675,7 +678,7 @@
       authLine: 'Every request needs the header', refTitle: 'Core endpoints',
       thMethod: 'Method', thPath: 'Path', thPurpose: 'Purpose',
       r1: 'Save one memory', r2: 'Save many memories, up to 200 per request', r3: 'Search: original text with scores, or abstained when unknown',
-      r4: 'List the brains you own or that are shared with you', r5: 'Export every memory in a brain', r6: 'Delete one memory',
+      r4: 'List the brains you own or that are shared with you', r5: 'Export every memory in a brain', r6: 'Delete one memory', r7: 'Starting context: current value of every key, preferences and recent memories', r8: 'Every version of one key, including replaced values', r9: 'MCP server for Claude Code and other MCP clients',
       refNote: 'Each memory text can be at most 2,000 characters.',
 
       secEyebrow: 'Security', secTitle: 'Secure by design', secSub: 'These rules are enforced on the server, no matter how careful each user is.',

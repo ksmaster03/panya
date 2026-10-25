@@ -37,6 +37,8 @@ export interface Memory {
   validUntil: number
   active: boolean
   supersededBy: string
+  /** เวลาที่ถูกแทน (0 = ยังเป็นค่าปัจจุบัน หรือถูกแทนก่อนมีฟิลด์นี้) */
+  invalidAt: number
   count: number
   source: string
   ref: string
@@ -48,6 +50,11 @@ export interface SearchHit extends Memory {
   coverage: number
   /** คะแนนจาก reranker (0-1) มีเมื่อการค้นครั้งนี้ถูกจัดอันดับซ้ำ */
   rerank?: number
+  /** คะแนนแยกส่วน เมื่อขอ explain */
+  explain?: {
+    denseRank: number; lexRank: number; sim: number; simNorm: number; coverage: number
+    weighted: number; rrf: number; decay: number; fusion: string; rerank?: number
+  }
 }
 
 export interface SearchResult {
@@ -121,6 +128,7 @@ function toMemory(id: string, m: Meta): Memory {
     validUntil: Number(m.validUntil) >= NEVER ? 0 : Number(m.validUntil),
     active: Number(m.active) === 1,
     supersededBy: String(m.supersededBy ?? ''),
+    invalidAt: Number(m.invalidAt ?? 0),
     count: Number(m.count ?? 1),
     source: String(m.source ?? ''),
     ref: String(m.ref ?? ''),
@@ -128,6 +136,19 @@ function toMemory(id: string, m: Meta): Memory {
 }
 
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x))
+const round4 = (x: number) => Math.round(x * 10000) / 10000
+
+// Reciprocal Rank Fusion: 1/(k + อันดับ) รวมสองฝั่ง · k = 60 ตามงานต้นฉบับ (Cormack et al. 2009)
+// คูณ RRF_SCALE ให้ค่าอยู่ราว 0-1 อ่านง่ายใน explain (ค่าสูงสุด 2/61)
+const RRF_K = 60
+const RRF_SCALE = (RRF_K + 1) / 2
+
+/** ความจำแบบเหตุการณ์ (kind=event) ค่อย ๆ ลดน้ำหนักตามอายุ ครึ่งหนึ่งทุก halfLife วัน · ข้อเท็จจริงและความชอบไม่ลด */
+export function recencyDecay(m: Pick<Memory, 'kind' | 'lastSeenAt' | 'createdAt'>, now: number, halfLifeDays: number): number {
+  if (m.kind !== 'event' || !(halfLifeDays > 0)) return 1
+  const ageDays = Math.max(0, now - (m.lastSeenAt || m.createdAt)) / 86_400_000
+  return Math.pow(0.5, ageDays / halfLifeDays)
+}
 
 export class MemoryStore {
   private constructor(
@@ -200,6 +221,14 @@ export class MemoryStore {
   }
 
   /**
+   * ความจำที่เป็นค่าปัจจุบัน ณ เวลา at: สร้างแล้ว ยังไม่หมดอายุ และยังไม่ถูกแทน (หรือถูกแทนหลังเวลานั้น)
+   * รุ่นที่ถูกแทนก่อนมีฟิลด์ invalidAt (ก่อนเพิ่มความสามารถนี้) จะไม่ถูกนับ
+   */
+  private asOfWhere(container: string, at: number): Where {
+    return { $and: [{ container }, { createdAt: { $lte: at } }, { validUntil: { $gt: at } }, { $or: [{ active: 1 }, { invalidAt: { $gt: at } }] }] } as Where
+  }
+
+  /**
    * บันทึกหลายรายการ: คำนวณ embedding รวมเป็นชุดเดียว (ส่วนที่ช้าที่สุด) แล้วเขียนตามลำดับ
    * ลำดับสำคัญ เพราะรายการหลังอาจทับหรือซ้ำกับรายการก่อนในชุดเดียวกัน
    */
@@ -235,7 +264,8 @@ export class MemoryStore {
         include: ['metadatas'],
       })
       for (let i = 0; i < old.ids.length; i++) {
-        const m = { ...(old.metadatas?.[i] as Meta), active: 0, supersededBy: id }
+        // invalidAt = เวลาที่รุ่นนี้เลิกเป็นค่าปัจจุบัน ใช้ตอบคำถามย้อนเวลา (asOf)
+        const m = { ...(old.metadatas?.[i] as Meta), active: 0, supersededBy: id, invalidAt: now }
         await this.col.update({ ids: old.ids[i]!, metadatas: m })
         action = 'superseded'
       }
@@ -285,12 +315,22 @@ export class MemoryStore {
   async search(
     container: string,
     q: string,
-    opts: { limit?: number; now?: number; tuning?: Partial<SearchTuning>; rerank?: boolean; rerankTop?: number } = {},
+    opts: {
+      limit?: number; now?: number; tuning?: Partial<SearchTuning>; rerank?: boolean; rerankTop?: number
+      /** ค้นเหมือนย้อนไปเวลานั้น (epoch ms) */
+      asOf?: number
+      /** รวมรุ่นที่ถูกแทนแล้วในผลค้น (ดูประวัติ) */
+      includeSuperseded?: boolean
+      /** แนบคะแนนแยกส่วนของแต่ละผล */
+      explain?: boolean
+    } = {},
   ): Promise<SearchResult> {
     const t = { ...config.search, ...opts.tuning }
-    const now = opts.now ?? Date.now()
+    const now = opts.asOf ?? opts.now ?? Date.now()
     const limit = opts.limit ?? 5
-    const where = this.liveWhere(container, now)
+    const where: Where = opts.asOf !== undefined
+      ? this.asOfWhere(container, opts.asOf)
+      : opts.includeSuperseded ? { $and: [{ container }, { validUntil: { $gt: now } }] } : this.liveWhere(container, now)
     const qTokens = tokenize(q)
 
     // ชื่อเฉพาะ: หาว่าคำค้นพูดถึงรายที่รู้จัก หรือรายที่ไม่เคยเห็น
@@ -319,17 +359,19 @@ export class MemoryStore {
     if (await unknownP) return { hits: [], abstained: true, reason: 'unknown_entity' }
     const [{ qVec, dense }, lex] = await Promise.all([denseP, lexP])
 
-    const cand = new Map<string, { meta: Meta; doc: string; sim: number }>()
+    // อันดับในแต่ละฝั่ง (1 = ดีที่สุด, 0 = ไม่อยู่ในฝั่งนั้น) ใช้รวมอันดับแบบ RRF
+    const cand = new Map<string, { meta: Meta; doc: string; sim: number; denseRank: number; lexRank: number }>()
     dense.ids[0]?.forEach((id, i) => {
       const d = dense.distances?.[0]?.[i]
-      cand.set(id, { meta: dense.metadatas?.[0]?.[i] as Meta, doc: dense.documents?.[0]?.[i] ?? '', sim: d == null ? 0 : 1 - d })
+      cand.set(id, { meta: dense.metadatas?.[0]?.[i] as Meta, doc: dense.documents?.[0]?.[i] ?? '', sim: d == null ? 0 : 1 - d, denseRank: i + 1, lexRank: 0 })
     })
     // ผู้สมัครที่มาจากฝั่งคำอย่างเดียว (ส่วนน้อย) ค่อยไปขอเวกเตอร์มาคิดความคล้าย
     const lexOnly: string[] = []
     lex?.ids[0]?.forEach((id, i) => {
-      if (cand.has(id)) return
+      const had = cand.get(id)
+      if (had) { had.lexRank = i + 1; return }
       lexOnly.push(id)
-      cand.set(id, { meta: lex.metadatas?.[0]?.[i] as Meta, doc: lex.documents?.[0]?.[i] ?? '', sim: 0 })
+      cand.set(id, { meta: lex.metadatas?.[0]?.[i] as Meta, doc: lex.documents?.[0]?.[i] ?? '', sim: 0, denseRank: 0, lexRank: i + 1 })
     })
     if (lexOnly.length) {
       const got = await this.reader().get({ ids: lexOnly, include: ['embeddings'] })
@@ -356,17 +398,29 @@ export class MemoryStore {
       const cov = coverage(qTokens, c.doc.split(' '))
       const simNorm = clamp01((c.sim - t.simFloor) / (t.simCeil - t.simFloor))
       // ความหมาย + คำที่ตรงกัน: ต้องมีอย่างใดอย่างหนึ่งชัดเจน หรือทั้งสองพอประมาณ จึงผ่านเกณฑ์
+      // คะแนนนี้ใช้ตัดสินว่า "รู้หรือไม่รู้" เสมอ ไม่ว่าจะเรียงลำดับด้วยวิธีใด
       const score = (1 - t.lexWeight) * simNorm + t.lexWeight * cov
-      hits.push({ ...toMemory(id, c.meta), score, sim: c.sim, coverage: cov })
+      const rrf = (c.denseRank ? 1 / (RRF_K + c.denseRank) : 0) + (c.lexRank ? 1 / (RRF_K + c.lexRank) : 0)
+      const mem = toMemory(id, c.meta)
+      const decay = recencyDecay(mem, now, t.eventHalfLifeDays)
+      const hit: SearchHit & { _rank: number } = { ...mem, score, sim: c.sim, coverage: cov, _rank: (t.fusion === 'rrf' ? rrf * RRF_SCALE : score) * decay }
+      if (opts.explain) hit.explain = { denseRank: c.denseRank, lexRank: c.lexRank, sim: round4(c.sim), simNorm: round4(simNorm), coverage: round4(cov), weighted: round4(score), rrf: round4(rrf * RRF_SCALE), decay: round4(decay), fusion: t.fusion }
+      hits.push(hit)
     }
-    hits.sort((a, b) => b.score - a.score || b.createdAt - a.createdAt)
+    // เรียงตามวิธีที่เลือก (weighted หรือ rrf) คูณการลดน้ำหนักตามอายุของความจำแบบเหตุการณ์
+    hits.sort((a, b) => (b as any)._rank - (a as any)._rank || b.createdAt - a.createdAt)
+    for (const h of hits) delete (h as any)._rank
 
     // จัดอันดับซ้ำ: อ่านคำถามคู่กับข้อความจริงของผู้สมัครอันดับต้น แล้วผสมกับคะแนนเดิม
     // ผู้สมัครที่ไม่ได้ส่งให้ reranker ถือว่าไม่ผ่าน และเกณฑ์ตัดใช้ rerankMinScore แทน minScore
     if (this.reranker && opts.rerank !== false) {
       const top = hits.slice(0, opts.rerankTop ?? config.rerank.top)
       const rr = await this.reranker.score(q, top.map((h) => h.text))
-      const mixed = top.map((h, i) => ({ ...h, rerank: rr[i]!, score: (1 - t.rerankWeight) * h.score + t.rerankWeight * rr[i]! }))
+      const mixed = top.map((h, i) => {
+        const m: SearchHit = { ...h, rerank: rr[i]!, score: (1 - t.rerankWeight) * h.score + t.rerankWeight * rr[i]! }
+        if (m.explain) m.explain = { ...m.explain, rerank: round4(rr[i]!) }
+        return m
+      })
       mixed.sort((a, b) => b.score - a.score || b.createdAt - a.createdAt)
       const kept = mixed.filter((h) => h.score >= t.rerankMinScore).slice(0, limit)
       return kept.length ? { hits: kept, abstained: false, reranked: true } : { hits: [], abstained: true, reason: 'no_match', reranked: true }
@@ -406,6 +460,33 @@ export class MemoryStore {
       keyed: all.filter((m) => m.kind !== 'preference' && m.subject),
       recent: all.filter((m) => m.kind !== 'preference' && !m.subject).slice(0, opts.limit ?? 10),
     }
+  }
+
+  /**
+   * บริบทตั้งต้นสำหรับผู้ช่วย AI ในคำขอเดียว ไม่ใช้ LLM:
+   *   current = ค่าปัจจุบันของทุกคีย์ (subject + attribute) ใหม่สุดก่อน
+   *   preferences = ความชอบ/ข้อกำหนดที่ยังใช้ได้
+   *   recent = ความจำที่เพิ่มหรือถูกพูดถึงซ้ำภายใน days วันล่าสุด (ไม่ซ้ำกับสองกลุ่มแรก)
+   */
+  async context(container: string, opts: { current?: number; preferences?: number; recent?: number; days?: number; now?: number } = {}) {
+    const now = opts.now ?? Date.now()
+    const days = Math.max(1, Math.min(3650, opts.days ?? 30))
+    const base: Where[] = [{ container }, { active: 1 }, { validUntil: { $gt: now } }]
+    const read = async (extra: Where[], limit: number) => {
+      const r = await this.reader().get({ where: { $and: [...base, ...extra] } as Where, include: ['metadatas'], limit })
+      return r.ids.map((id, i) => toMemory(id, r.metadatas?.[i] as Meta))
+    }
+    const [keyed, prefs, fresh] = await Promise.all([
+      read([{ subject: { $ne: '' } }, { attribute: { $ne: '' } }] as Where[], 5000),
+      read([{ kind: 'preference' }], 1000),
+      read([{ lastSeenAt: { $gte: now - days * 86_400_000 } }] as Where[], 5000),
+    ])
+    const newest = (a: Memory, b: Memory) => b.lastSeenAt - a.lastSeenAt || b.createdAt - a.createdAt
+    const current = keyed.sort(newest).slice(0, opts.current ?? 50)
+    const preferences = prefs.filter((m) => !(m.subject && m.attribute)).sort(newest).slice(0, opts.preferences ?? 30)
+    const seen = new Set([...current, ...preferences].map((m) => m.id))
+    const recent = fresh.filter((m) => !seen.has(m.id)).sort(newest).slice(0, opts.recent ?? 20)
+    return { current, preferences, recent, totals: { current: keyed.length, preferences: prefs.length, recent: fresh.length }, days }
   }
 
   /**

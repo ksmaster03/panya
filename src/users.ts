@@ -18,7 +18,14 @@ export interface User {
 
 export interface Session { user: User; expiresAt: number }
 
-export interface UserKey { id: string; name: string; prefix: string; createdAt: number; lastUsedAt: number }
+/** ขอบเขตของ API key: brains = เฉพาะสมองเหล่านี้ (null = ทุกสมองที่เจ้าของเข้าได้) · read = อ่านและค้นเท่านั้น · expiresAt 0 = ไม่หมดอายุ */
+export interface KeyLimits { brains: string[] | null; mode: 'read' | 'write'; expiresAt: number }
+export interface UserKey extends KeyLimits { id: string; name: string; prefix: string; createdAt: number; lastUsedAt: number }
+
+const toKey = (r: any): UserKey => ({
+  id: String(r.id), name: String(r.name), prefix: `pnu_${r.id}_…`, createdAt: Number(r.created_at), lastUsedAt: Number(r.last_used),
+  brains: r.brains ? JSON.parse(r.brains) : null, mode: r.mode === 'read' ? 'read' : 'write', expiresAt: Number(r.expires_at ?? 0),
+})
 
 const SESSION_MS = 12 * 3600_000
 /** ตรวจ session ซ้ำกับฐานข้อมูลไม่บ่อยกว่านี้ ผู้ใช้ที่ถูกระงับจะหลุดภายในเวลานี้ */
@@ -50,8 +57,12 @@ export class UserRegistry {
       'CREATE TABLE IF NOT EXISTS panya_sessions (token_hash CHAR(64) NOT NULL PRIMARY KEY, username VARCHAR(64) NOT NULL, expires_at BIGINT NOT NULL, created_at BIGINT NOT NULL, ip VARCHAR(64))',
     )
     await client.execute(
-      'CREATE TABLE IF NOT EXISTS panya_user_keys (id CHAR(12) NOT NULL PRIMARY KEY, username VARCHAR(64) NOT NULL, name VARCHAR(64) NOT NULL, key_hash CHAR(64) NOT NULL, created_at BIGINT NOT NULL, last_used BIGINT NOT NULL DEFAULT 0)',
+      'CREATE TABLE IF NOT EXISTS panya_user_keys (id CHAR(12) NOT NULL PRIMARY KEY, username VARCHAR(64) NOT NULL, name VARCHAR(64) NOT NULL, key_hash CHAR(64) NOT NULL, created_at BIGINT NOT NULL, last_used BIGINT NOT NULL DEFAULT 0, brains TEXT, mode VARCHAR(8) NOT NULL DEFAULT \'write\', expires_at BIGINT NOT NULL DEFAULT 0)',
     )
+    // ตารางที่สร้างก่อนมี key แบบจำกัดขอบเขต: เพิ่มคอลัมน์ (มีอยู่แล้วจะ error ก็ข้าม)
+    for (const col of ['brains TEXT', "mode VARCHAR(8) NOT NULL DEFAULT 'write'", 'expires_at BIGINT NOT NULL DEFAULT 0']) {
+      await client.execute(`ALTER TABLE panya_user_keys ADD COLUMN ${col}`).catch(() => {})
+    }
     const r = new UserRegistry(client)
     await r.count()
     return r
@@ -59,21 +70,25 @@ export class UserRegistry {
 
   // ── API key ของผู้ใช้ ─────────────────────────────────────────────
   // รูปแบบ pnu_<id>_<สุ่ม 32 ตัว> · เก็บเฉพาะ sha256 · สิทธิ์เท่ากับเจ้าของ key (role + สมอง) ณ เวลาที่ใช้
-  private keyCache = new Map<string, { user: User; id: string; checkedAt: number } | null>()
+  private keyCache = new Map<string, { user: User; limits: KeyLimits; checkedAt: number } | null>()
 
   async listKeys(username: string): Promise<UserKey[]> {
-    const rows = (await this.client.execute('SELECT id, name, created_at, last_used FROM panya_user_keys WHERE username = ? ORDER BY created_at', [username])) ?? []
-    return rows.map((r: any) => ({ id: String(r.id), name: String(r.name), prefix: `pnu_${r.id}_…`, createdAt: Number(r.created_at), lastUsedAt: Number(r.last_used) }))
+    const rows = (await this.client.execute('SELECT * FROM panya_user_keys WHERE username = ? ORDER BY created_at', [username])) ?? []
+    return rows.map(toKey)
   }
 
-  /** สร้าง key ใหม่ คืนค่า key เต็มครั้งเดียว */
-  async createKey(username: string, name: string): Promise<{ key: string; info: UserKey }> {
+  /** สร้าง key ใหม่ คืนค่า key เต็มครั้งเดียว · limits: เฉพาะบางสมอง / อ่านอย่างเดียว / วันหมดอายุ */
+  async createKey(username: string, name: string, limits: Partial<KeyLimits> = {}): Promise<{ key: string; info: UserKey }> {
     const abc = 'abcdefghijkmnpqrstuvwxyz23456789'
     const pick = (n: number) => Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) => abc[b % abc.length]).join('')
     const id = pick(12), key = `pnu_${id}_${randomPassword()}${randomPassword().slice(0, 12)}`
     const now = Date.now()
-    await this.client.execute('INSERT INTO panya_user_keys (id, username, name, key_hash, created_at) VALUES (?, ?, ?, ?, ?)', [id, username, name, sha256(key), now])
-    return { key, info: { id, name, prefix: `pnu_${id}_…`, createdAt: now, lastUsedAt: 0 } }
+    const brains = limits.brains?.length ? limits.brains : null, mode = limits.mode === 'read' ? 'read' : 'write', expiresAt = limits.expiresAt ?? 0
+    await this.client.execute(
+      'INSERT INTO panya_user_keys (id, username, name, key_hash, created_at, brains, mode, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [id, username, name, sha256(key), now, brains ? JSON.stringify(brains) : null, mode, expiresAt],
+    )
+    return { key, info: { id, name, prefix: `pnu_${id}_…`, createdAt: now, lastUsedAt: 0, brains, mode, expiresAt } }
   }
 
   async revokeKey(username: string, id: string): Promise<boolean> {
@@ -84,23 +99,25 @@ export class UserRegistry {
     return true
   }
 
-  /** ผู้ใช้เจ้าของ key (ที่ยังใช้งานได้) หรือ null */
-  async userForKey(key: string): Promise<User | null> {
+  /** ผู้ใช้เจ้าของ key พร้อมขอบเขตของ key (ที่ยังใช้งานได้และไม่หมดอายุ) หรือ null */
+  async userForKey(key: string): Promise<{ user: User; limits: KeyLimits } | null> {
     const m = key.match(/^pnu_([a-z0-9]{12})_[A-Za-z0-9]{20,}$/)
     if (!m) return null
     const h = sha256(key), now = Date.now()
     const hit = this.keyCache.get(h)
-    if (hit !== undefined && (!hit || now - hit.checkedAt < RECHECK_MS)) return hit?.user ?? null
+    const fresh = (v: { user: User; limits: KeyLimits } | null) => (v && v.limits.expiresAt && v.limits.expiresAt <= now ? null : v)
+    if (hit !== undefined && (!hit || now - hit.checkedAt < RECHECK_MS)) return fresh(hit ? { user: hit.user, limits: hit.limits } : null)
     const rows = (await this.client.execute(
-      'SELECT k.id AS key_id, k.last_used, u.* FROM panya_user_keys k JOIN panya_users u ON u.username = k.username WHERE k.key_hash = ?', [h],
+      'SELECT k.id AS key_id, k.last_used, k.brains AS key_brains, k.mode AS key_mode, k.expires_at AS key_expires, u.* FROM panya_user_keys k JOIN panya_users u ON u.username = k.username WHERE k.key_hash = ?', [h],
     )) ?? []
     const row = rows[0]
     if (!row || Number(row.disabled) === 1) { this.keyCache.set(h, null); return null }
     const user = toUser(row)
-    this.keyCache.set(h, { user, id: String(row.key_id), checkedAt: now })
+    const limits: KeyLimits = { brains: row.key_brains ? JSON.parse(row.key_brains) : null, mode: row.key_mode === 'read' ? 'read' : 'write', expiresAt: Number(row.key_expires ?? 0) }
+    this.keyCache.set(h, { user, limits, checkedAt: now })
     // บันทึกเวลาใช้ล่าสุด ไม่บ่อยกว่านาทีละครั้งต่อ key
     if (now - Number(row.last_used) > 60_000) await this.client.execute('UPDATE panya_user_keys SET last_used = ? WHERE id = ?', [now, String(row.key_id)])
-    return user
+    return fresh({ user, limits })
   }
 
   /** จำนวนผู้ใช้ทั้งหมด · มีอย่างน้อยหนึ่งคน = หน้าเว็บต้องล็อกอิน */

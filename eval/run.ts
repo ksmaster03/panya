@@ -50,7 +50,7 @@ const raw = new Map<string, SearchHit[]>()
 const lat: number[] = []
 for (const query of queries) {
   const t = Date.now()
-  const r = await store.search(CONTAINER, query.q, { limit: 20, rerankTop: 20, tuning: { minScore: -1, rerankMinScore: -1 } })
+  const r = await store.search(CONTAINER, query.q, { limit: 20, rerankTop: 20, explain: true, tuning: { minScore: -1, rerankMinScore: -1 } })
   lat.push(Date.now() - t)
   raw.set(query.q, r.hits)
 }
@@ -60,11 +60,13 @@ const mean = (a: number[]) => a.reduce((x, y) => x + y, 0) / a.length
 // ความจำจริงที่เป็นตัวกวนไม่มีรหัสในชุดทดสอบ: ติดอันดับเมื่อไรถือว่าตอบผิด
 const nameOf = (h: SearchHit) => idOf.get(h.id) ?? 'real:' + h.id.slice(0, 8)
 const baseScore = (t: SearchTuning, h: SearchHit) => (1 - t.lexWeight) * clamp((h.sim - t.simFloor) / (t.simCeil - t.simFloor)) + t.lexWeight * h.coverage
+// เกณฑ์ "รู้/ไม่รู้" ใช้คะแนน weighted เสมอ ส่วนลำดับเรียงตาม fusion ที่ตั้งไว้ (PANYA_FUSION=rrf วัดแบบ RRF)
 const at = (t: SearchTuning) => (q: Q): Ranked =>
   raw.get(q.q)!
-    .map((h) => ({ id: nameOf(h), score: baseScore(t, h) }))
-    .sort((a, b) => b.score - a.score)
+    .map((h) => ({ id: nameOf(h), score: baseScore(t, h), order: t.fusion === 'rrf' ? h.explain!.rrf : baseScore(t, h) }))
+    .sort((a, b) => b.order - a.order)
     .filter((h) => h.score >= t.minScore)
+    .map(({ id, score }) => ({ id, score }))
 // จำลองสิ่งที่ search() ทำเมื่อเปิด reranker: เลือก top ตามคะแนนเดิม ผสมคะแนน แล้วตัดด้วย rerankMinScore
 const atRerank = (t: SearchTuning, top: number) => (q: Q): Ranked =>
   raw.get(q.q)!

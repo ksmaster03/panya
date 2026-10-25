@@ -47,6 +47,11 @@ export const config = {
     lexWeight: num(process.env.PANYA_LEX_WEIGHT, 0.4),
     candidates: num(process.env.PANYA_CANDIDATES, 20),
     dedupeSim: num(process.env.PANYA_DEDUPE_SIM, 0.985),
+    // วิธีเรียงผลที่ผ่านเกณฑ์: weighted = คะแนนความหมาย+คำ · rrf = Reciprocal Rank Fusion ของสองฝั่ง
+    // (เกณฑ์ "รู้/ไม่รู้" ใช้คะแนน weighted เสมอ) · เลือกค่าเริ่มต้นจากผล bun run eval
+    fusion: (process.env.PANYA_FUSION === 'rrf' ? 'rrf' : 'weighted') as 'weighted' | 'rrf',
+    // ความจำแบบเหตุการณ์ (kind=event) น้ำหนักลดครึ่งทุกกี่วัน · 0 = ไม่ลด
+    eventHalfLifeDays: num(process.env.PANYA_EVENT_HALFLIFE_DAYS, 90),
   },
 }
 
