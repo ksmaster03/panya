@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // รับ-ส่ง skill ของ Claude Code กับ panya ผ่าน HTTP API · ใช้ Node 18+ อย่างเดียว ไม่มี dependency
-//   node panya-skills.mjs setup --url http://host:6800 --key <api key>
+//   node panya-skills.mjs setup --key <api key> [--url https://panya.toptierdigital.space]
 //   node panya-skills.mjs push [--only <ชื่อ>] [--plugins] [--dry]
 //   node panya-skills.mjs list [คำกรอง]
 //   node panya-skills.mjs search <คำถาม>
@@ -13,6 +13,8 @@ import { basename, dirname, join, relative } from 'node:path'
 
 const CLAUDE = join(homedir(), '.claude')
 const CONFIG = join(CLAUDE, 'panya.json')
+// panya บนคลาวด์ (AWS กรุงเทพ ผ่าน Cloudflare) · เปลี่ยนได้ด้วย setup --url หรือตัวแปร PANYA_URL
+const DEFAULT_URL = 'https://panya.toptierdigital.space'
 const PREFIX = 'claude-skill/'
 
 // ── อาร์กิวเมนต์ ──────────────────────────────────────────────────
@@ -26,12 +28,14 @@ for (let i = 1; i < argv.length; i++) {
   else words.push(argv[i])
 }
 const brain = flags.brain || 'claude-skills'
-const fail = (msg) => { console.error(msg); process.exit(1) }
+// โยนแล้วจบที่ท้ายไฟล์ ไม่เรียก process.exit ตรง ๆ: บน Windows การปิดทันทีขณะ fetch ยังถือ socket อยู่ทำให้ Node แครช (UV_HANDLE_CLOSING)
+class Fail extends Error {}
+const fail = (msg) => { throw new Fail(msg) }
 
 // ── การเชื่อมต่อ: ตัวแปรแวดล้อมมาก่อน แล้วจึงไฟล์ ~/.claude/panya.json ──
 async function config() {
   const file = JSON.parse(await readFile(CONFIG, 'utf8').catch(() => '{}'))
-  const url = (process.env.PANYA_URL || file.url || 'http://127.0.0.1:6800').replace(/\/+$/, '')
+  const url = (process.env.PANYA_URL || file.url || DEFAULT_URL).replace(/\/+$/, '')
   const key = process.env.PANYA_API_KEY || file.key
   if (!key) fail(`ยังไม่ได้ตั้งค่า API key · รัน: node ${basename(process.argv[1])} setup --url <url> --key <key>  (หรือตั้ง PANYA_URL และ PANYA_API_KEY)`)
   return { url, key }
@@ -48,6 +52,32 @@ async function call(method, path, body) {
   return res.json()
 }
 const q = (o) => '?' + new URLSearchParams(o)
+// เหมือน call แต่ไม่จบโปรแกรมเมื่อเซิร์ฟเวอร์ตอบ error
+async function tryCall(method, path, body) {
+  conn ??= await config()
+  const res = await fetch(conn.url + path, {
+    method,
+    headers: { authorization: 'Bearer ' + conn.key, ...(body ? { 'content-type': 'application/json' } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  }).catch((e) => fail(`ติดต่อ panya ที่ ${conn.url} ไม่ได้: ${e.cause?.code || e.message}`))
+  return { ok: res.ok, status: res.status, data: await res.json().catch(() => ({})) }
+}
+const isSecretRefusal = (r) => r.status === 400 && /never stores secrets/.test(r.data?.error || '')
+// ส่งเป็นชุด · ถ้าเซิร์ฟเวอร์ปฏิเสธเพราะเจอสิ่งที่ดูเหมือนความลับ ให้ส่งทีละรายการและข้ามเฉพาะรายการนั้น ไม่ทิ้งทั้งชุด
+async function sendBatch(memories) {
+  const r = await tryCall('POST', '/v1/memories/batch', { brain, memories })
+  if (r.ok) return { sent: memories.length, refused: [] }
+  if (!isSecretRefusal(r)) fail(`panya ตอบ ${r.status}: ${r.data?.error || ''}`)
+  const refused = []
+  let sent = 0
+  for (const m of memories) {
+    const one = await tryCall('POST', '/v1/memories', { brain, ...m })
+    if (one.ok) sent++
+    else if (isSecretRefusal(one)) refused.push(m.source || m.subject)
+    else fail(`panya ตอบ ${one.status}: ${one.data?.error || ''}`)
+  }
+  return { sent, refused }
+}
 
 // ── แปลงไฟล์ markdown เป็นชิ้นความจำ (ตรงกับ src/import-md.ts ของ panya) ──
 function parse(raw, fallbackName) {
@@ -153,9 +183,9 @@ const mainFirst = (files) => files.slice().sort((a, b) => (b.rel === 'SKILL.md')
 // ── คำสั่ง ─────────────────────────────────────────────────────────
 const commands = {
   async setup() {
-    if (!flags.url || !flags.key) fail('ใช้: setup --url http://host:6800 --key <api key>')
+    if (!flags.key) fail('ใช้: setup --key <api key จากหน้า บัญชีและ API> [--url https://panya.toptierdigital.space]')
     await mkdir(CLAUDE, { recursive: true })
-    await writeFile(CONFIG, JSON.stringify({ url: flags.url.replace(/\/+$/, ''), key: flags.key }, null, 2) + '\n', { mode: 0o600 })
+    await writeFile(CONFIG, JSON.stringify({ url: (flags.url || DEFAULT_URL).replace(/\/+$/, ''), key: flags.key }, null, 2) + '\n', { mode: 0o600 })
     const s = await call('GET', '/v1/stats' + q({ brain }))
     console.log(`บันทึกการเชื่อมต่อไว้ที่ ${CONFIG} · brain "${brain}" มี ${s.memories} ความจำ`)
   },
@@ -179,11 +209,14 @@ const commands = {
     if (flags.dry) return console.log('โหมด --dry: ไม่ได้ส่งอะไร')
     // ส่งซ้ำได้: ของเดิมจากไฟล์เดียวกันถูกลบก่อน แล้วจึงใส่ใหม่
     for (const source of sources) await call('DELETE', '/v1/sources' + q({ brain, source }))
+    const refused = []
     for (let i = 0; i < inputs.length; i += 100) {
-      await call('POST', '/v1/memories/batch', { brain, memories: inputs.slice(i, i + 100) })
+      refused.push(...(await sendBatch(inputs.slice(i, i + 100))).refused)
       process.stdout.write(`\rส่งแล้ว ${Math.min(i + 100, inputs.length)}/${inputs.length}`)
     }
     console.log(inputs.length ? '\nเสร็จ' : 'ไม่มีอะไรให้ส่ง')
+    // panya ไม่เก็บความลับ: ชิ้นที่ถูกปฏิเสธจะขาดหายจากไฟล์ที่ดึงกลับ ให้แก้ไฟล์ต้นทางแล้วส่งใหม่
+    if (refused.length) console.log(`ข้าม ${refused.length} ชิ้นที่ดูเหมือนมีความลับ (ไฟล์เหล่านี้จะดึงกลับได้ไม่ครบ):\n  ` + [...new Set(refused)].join('\n  '))
   },
 
   async list() {
@@ -227,5 +260,12 @@ const commands = {
   },
 }
 
-if (!commands[cmd]) fail('คำสั่ง: setup | push | list | search | show | pull   (ดูวิธีใช้ที่หัวไฟล์)')
-await commands[cmd]()
+if (!commands[cmd]) {
+  console.error('คำสั่ง: setup | push | list | search | show | pull   (ดูวิธีใช้ที่หัวไฟล์)')
+  process.exitCode = 1
+} else try {
+  await commands[cmd]()
+} catch (e) {
+  console.error(e instanceof Fail ? e.message : e)
+  process.exitCode = 1
+}
