@@ -10,6 +10,9 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 DEPLOY_DIR="${DEPLOY_DIR:-D:/tmp/panya-deploy}"
 [ -z "$(git -C "$DEPLOY_DIR" status --porcelain)" ] || { echo "$DEPLOY_DIR has uncommitted changes"; exit 1; }
 SHA="$(git -C "$DEPLOY_DIR" rev-parse --short=7 HEAD)"
+# เพลงประกอบ (*.mp3) ไม่อยู่ใน git เพราะ repo เป็น public จึงคัดลอกจาก tree หลักเข้า clone ก่อน build
+# ไฟล์ถูก gitignore อยู่แล้ว clone จึงยังนับว่าสะอาด
+for f in "$HERE"/../src/assets/*.mp3; do [ -f "$f" ] && cp -f "$f" "$DEPLOY_DIR/src/assets/" && ok "asset $(basename "$f")"; done
 REPO="$(out_get ecr_repo)"; BUCKET="$(out_get bucket)"; IID="$(out_get instance_id)"
 [ -n "$REPO" ] && [ -n "$IID" ] || { echo "run 01-provision.sh first"; exit 1; }
 IMAGE="$REPO:$SHA"
