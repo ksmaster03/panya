@@ -202,7 +202,7 @@
   @media (prefers-reduced-motion: reduce) { #live i, .ev { animation: none; } }
 </style>
 <link rel="stylesheet" href="/assets/legacy-light.css?v=1">
-<script src="/assets/ui.js?v=1"></script>
+<script src="/assets/ui.js?v=2"></script>
 </head>
 <body>
 <header>
@@ -1009,7 +1009,7 @@ function buildStrips(names) {
 // ---------- เสียงประกอบ: แถบเสียง คลื่นเสียงทั้งเพลง และแท่งความถี่สด ----------
 // เบราว์เซอร์ไม่ยอมให้เล่นเสียงเอง จึงเริ่มเมื่อผู้ใช้กดเล่นเท่านั้น และไฟล์เพลงถูกโหลดตอนนั้น
 const audio = new Audio()
-audio.src = '/assets/mr-scratch.mp3'; audio.loop = true; audio.preload = 'none'
+audio.src = '/assets/mr-scratch.mp3?v=2'; audio.loop = true; audio.preload = 'none'
 audio.volume = Math.max(0, Math.min(1, Number(localStorage.getItem('panya.vol') ?? 0.6)))
 const snd = { ctx: null, analyser: null, freq: null, time: null, peaks: null, state: 'sndIdle' }
 const PEAKS = 480

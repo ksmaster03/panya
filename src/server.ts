@@ -210,10 +210,12 @@ export function createApp(
   // รองรับ Range เพื่อให้เบราว์เซอร์เลื่อนตำแหน่งเพลงและเล่นวนได้
   const AUDIO = { mp3: 'audio/mpeg', ogg: 'audio/ogg', wav: 'audio/wav', js: 'text/javascript; charset=utf-8', css: 'text/css; charset=utf-8', svg: 'image/svg+xml' } as const
   app.get('/assets/:file', async (c) => {
+    // 404 ห้ามแคช: ไม่งั้นเบราว์เซอร์กับ Cloudflare จำว่า "ไม่มีไฟล์" ไว้หลายชั่วโมงแม้ deploy ไฟล์ขึ้นไปแล้ว
+    const missing = () => c.text('Not Found', 404, { 'cache-control': 'no-store' })
     const m = c.req.param('file').match(/^[a-z0-9-]+\.(mp3|ogg|wav|js|css|svg)$/)
-    if (!m) return c.notFound()
+    if (!m) return missing()
     const file = Bun.file(new URL('./assets/' + m[0], import.meta.url))
-    if (!(await file.exists())) return c.notFound()
+    if (!(await file.exists())) return missing()
     const headers = { 'content-type': AUDIO[m[1] as keyof typeof AUDIO], 'accept-ranges': 'bytes', 'cache-control': 'public, max-age=86400' }
     const range = c.req.header('range')?.match(/^bytes=(\d*)-(\d*)$/)
     if (!range || (!range[1] && !range[2])) return new Response(file, { headers: { ...headers, 'content-length': String(file.size) } })

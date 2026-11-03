@@ -6,18 +6,21 @@
 <meta name="robots" content="noindex">
 <title>panya · เข้าสู่ระบบ</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap">
-<link rel="stylesheet" href="/assets/ui.css?v=1">
-<script src="/assets/ui.js?v=1"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="/assets/ui.css?v=2">
+<script src="/assets/ui.js?v=2"></script>
+<script src="/assets/fx.js?v=1" defer></script>
 <style>
-  body { min-height: 100vh; display: flex; flex-direction: column; background: radial-gradient(900px 520px at 85% -10%, color-mix(in srgb, var(--brand) 18%, transparent), transparent 70%), radial-gradient(700px 480px at -10% 110%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 70%), var(--bg); }
+  body { min-height: 100vh; display: flex; flex-direction: column; position: relative; isolation: isolate; background: var(--bg); }
+  body > canvas.fx { position: fixed; }
   .wrap { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 440px); gap: 48px; align-items: center; max-width: 1100px; width: 100%; margin: 0 auto; padding: 32px 16px; }
-  .pitch h1 { font-size: clamp(28px, 3.6vw, 40px); }
+  .pitch h1 { font-size: clamp(32px, 4.6vw, 58px); line-height: 1.1; letter-spacing: -.04em; }
+  :lang(th) .pitch h1 { line-height: 1.3; letter-spacing: 0; }
   .pitch p { color: var(--ink-2); font-size: 17px; max-width: 46ch; }
   .pitch ul { list-style: none; padding: 0; margin: 20px 0 0; display: grid; gap: 10px; color: var(--ink-2); }
   .pitch li { display: flex; gap: 10px; align-items: flex-start; }
   .pitch li svg { flex: none; width: 22px; height: 22px; color: var(--accent); margin-top: 3px; }
-  form.card { padding: 28px; display: grid; gap: 14px; }
+  form.card { padding: 30px; display: grid; gap: 14px; border-radius: 22px; box-shadow: var(--shadow-lg); }
   form.card h2 { margin: 0; font-size: 22px; }
   #err { color: var(--crit); min-height: 1.6em; margin: 0; font-size: 15px; }
   .pw-wrap { position: relative; }
@@ -27,6 +30,7 @@
 </style>
 </head>
 <body>
+<canvas class="fx" data-fx="silk" aria-hidden="true"></canvas>
 <header class="app-header"></header>
 <main id="main" class="wrap">
   <section class="pitch">
@@ -38,7 +42,7 @@
       <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span data-i18n="p3"></span></li>
     </ul>
   </section>
-  <form id="f" class="card" novalidate>
+  <form id="f" class="card glass" novalidate>
     <h2 data-i18n="signIn"></h2>
     <p class="muted small" style="margin:0" data-i18n="help"></p>
     <label class="field" for="u"><span data-i18n="user"></span><input id="u" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus></label>

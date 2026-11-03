@@ -7,18 +7,23 @@
 <meta name="description" content="panya สมองที่สองแบบโฮสต์เอง เก็บความจำตามจริง ค้นได้ทั้งไทยและอังกฤษ และบอกตรง ๆ เมื่อไม่รู้">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap">
-<link rel="stylesheet" href="/assets/ui.css?v=1">
-<script src="/assets/ui.js?v=1"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="/assets/ui.css?v=2">
+<script src="/assets/ui.js?v=2"></script>
+<script src="/assets/fx.js?v=1" defer></script>
 <style>
   /* landing เท่านั้น: ใช้โทเคนจาก ui.css ทั้งหมด เพิ่มแค่เลย์เอาต์และภาพประกอบ */
-  :root { --grad-a: #2563eb; --grad-b: #0e9f8e; --glow: rgba(37, 99, 235, .16); --glow-2: rgba(14, 159, 142, .12); }
-  :root[data-theme="dark"] { --grad-a: #5b9dff; --grad-b: #3fd0bd; --glow: rgba(91, 157, 255, .18); --glow-2: rgba(63, 208, 189, .12); }
+  :root { --grad-a: #1f4fff; --grad-b: #0891b2; --glow: rgba(31, 79, 255, .14); --glow-2: rgba(8, 145, 178, .1); }
+  :root[data-theme="dark"] { --grad-a: #4f7cff; --grad-b: #22d3ee; --glow: rgba(47, 98, 255, .2); --glow-2: rgba(34, 211, 238, .1); }
+  /* บรรทัดที่สองของหัวข้อ: ไล่จากสีตัวอักษรลงไปเป็นน้ำเงิน เหมือนโลหะสะท้อนแสง */
+  .hero h1 .grad-text { background: linear-gradient(180deg, var(--ink) 25%, color-mix(in srgb, var(--grad-a) 75%, var(--ink))); -webkit-background-clip: text; background-clip: text; color: transparent; padding-bottom: .08em; }
   html { scroll-behavior: smooth; scroll-padding-top: calc(var(--header-h) + 12px); }
   body { overflow-x: hidden; }
   .wrap { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
   section { padding: 96px 0; }
-  .sec-alt { background: var(--surface); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  .sec-alt { background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--surface) 70%, transparent) 30%, transparent); border-top: 1px solid var(--line); }
+  .sec-head h2 { font-size: clamp(28px, 3.6vw, 46px) !important; letter-spacing: -.035em; line-height: 1.12; }
+  :lang(th) .sec-head h2 { letter-spacing: 0; line-height: 1.35; }
   .eyebrow { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; color: var(--brand); margin-bottom: 12px; }
   .eyebrow::before { content: ""; width: 18px; height: 2px; border-radius: 2px; background: linear-gradient(90deg, var(--grad-a), var(--grad-b)); }
   .sec-head { max-width: 680px; margin-bottom: 48px; }
@@ -26,29 +31,49 @@
   .sec-head p { color: var(--muted); font-size: 17px; margin: 0; }
   .grad-text { background: linear-gradient(100deg, var(--grad-a), var(--grad-b)); -webkit-background-clip: text; background-clip: text; color: transparent; }
 
-  /* ── hero ── */
-  .hero { position: relative; padding: 72px 0 88px; overflow: hidden; isolation: isolate; }
-  .hero::before { content: ""; position: absolute; inset: 0; z-index: -1;
-    background: radial-gradient(600px 380px at 78% 30%, var(--glow), transparent 70%), radial-gradient(520px 340px at 60% 85%, var(--glow-2), transparent 70%); }
-  .hero::after { content: ""; position: absolute; inset: 0; z-index: -1; opacity: .5;
-    background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px);
-    background-size: 44px 44px; -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 40%, #000 20%, transparent 75%); mask-image: radial-gradient(ellipse 70% 60% at 50% 40%, #000 20%, transparent 75%); }
-  .hero-grid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 48px; align-items: center; }
-  .pill { display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px 4px 6px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); font-size: 14px; box-shadow: var(--shadow); margin-bottom: 22px; }
-  .pill b { padding: 1px 8px; border-radius: 999px; background: var(--brand-soft); color: var(--brand); font-size: 12.5px; font-weight: 600; }
-  .hero h1 { font-size: clamp(32px, 4.2vw, 50px); line-height: 1.22; font-weight: 700; margin-bottom: 20px; text-wrap: balance; }
+  /* ── hero: หัวข้อใหญ่จัดกลางบนฉากหลัง shader แล้วตามด้วยกรอบโชว์หน้าแอป ── */
+  .hero { position: relative; padding: 88px 0 72px; overflow: hidden; isolation: isolate; text-align: center; }
+  .hero::after { content: ""; position: absolute; inset: auto 0 0; height: 220px; z-index: -1; background: linear-gradient(transparent, var(--bg)); pointer-events: none; }
+  .hero-center { display: flex; flex-direction: column; align-items: center; }
+  .pill { display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px 4px 5px; border-radius: 999px; border: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 60%, transparent); backdrop-filter: blur(8px); color: var(--ink-2); font-size: 14px; margin-bottom: 26px; }
+  .pill b { padding: 1px 9px; border-radius: 999px; background: var(--brand); color: var(--brand-ink); font-size: 12.5px; font-weight: 600; }
+  .hero h1 { font-size: clamp(38px, 6.6vw, 86px); line-height: 1.04; font-weight: 700; letter-spacing: -.045em; margin: 0 auto 24px; max-width: 15ch; text-wrap: balance; }
+  :lang(th) .hero h1 { font-size: clamp(34px, 5.4vw, 70px); line-height: 1.28; letter-spacing: -.01em; max-width: 18ch; }
   .hero h1 .l2 { display: block; }
-  :lang(th) .hero h1 { line-height: 1.35; }
-  :lang(en) .hero h1 { font-size: clamp(30px, 3.6vw, 44px); }
-  .hero .lede { font-size: 18px; color: var(--ink-2); max-width: 560px; margin-bottom: 30px; }
-  .cta { display: flex; flex-wrap: wrap; gap: 12px; }
-  .btn.lg { min-height: 50px; padding: 0 22px; font-size: 16px; border-radius: 12px; }
-  .btn.primary.lg { box-shadow: 0 6px 20px color-mix(in srgb, var(--brand) 30%, transparent); }
-  .hero-meta { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 28px; color: var(--muted); font-size: 14px; list-style: none; padding: 0; }
+  .hero .lede { font-size: clamp(16.5px, 1.5vw, 19px); color: var(--ink-2); max-width: 640px; margin: 0 auto 34px; }
+  .cta { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; }
+  .btn.lg { min-height: 50px; padding: 0 24px; font-size: 16px; border-radius: 12px; }
+  .hero-meta { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 22px; margin: 26px 0 0; color: var(--ink-2); font-size: 14px; list-style: none; padding: 0; }
   .hero-meta li { display: inline-flex; align-items: center; gap: 7px; }
   .hero-meta svg { width: 16px; height: 16px; color: var(--good); flex: none; }
-  .hero-art { position: relative; }
+  .hero-show { margin-top: 64px; perspective: 1600px; }
+  .hero-show .frame { max-width: 1060px; margin: 0 auto; transform: rotateX(8deg); transform-origin: 50% 0; transition: transform .8s cubic-bezier(.2, .7, .2, 1); text-align: left; }
+  .hero-show.in .frame { transform: none; }
+  .win-top { display: flex; align-items: center; gap: 12px; height: 42px; padding: 0 14px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
+  .win-top .dots { display: flex; gap: 6px; } .win-top .dots i { width: 11px; height: 11px; border-radius: 50%; background: var(--line-2); }
+  .win-top .url { flex: 1; max-width: 360px; margin: 0 auto; height: 26px; border-radius: 8px; background: var(--bg); border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 12.5px; color: var(--muted); font-family: var(--mono); }
+  .win-top .url svg { width: 12px; height: 12px; }
+  .win-body { display: grid; grid-template-columns: 210px minmax(0, 1fr); min-height: 420px; }
+  .win-side { border-right: 1px solid var(--line); padding: 14px 10px; display: grid; align-content: start; gap: 2px; font-size: 14px; color: var(--muted); background: color-mix(in srgb, var(--surface-2) 45%, var(--surface)); }
+  .win-side .ws-q { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px; margin-bottom: 10px; border-radius: 9px; border: 1px solid var(--line); background: var(--surface); font-size: 13px; }
+  .win-side .ws-q svg { width: 14px; height: 14px; } .win-side .ws-q kbd { margin-left: auto; height: 18px; min-width: 18px; font-size: 10.5px; }
+  .win-side .ws-h { padding: 12px 10px 4px; font-size: 12px; font-weight: 600; }
+  .win-side a { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border-radius: 8px; color: var(--ink-2); text-decoration: none; }
+  .win-side a i { width: 8px; height: 8px; border-radius: 3px; background: var(--line-2); }
+  .win-side a.on { background: var(--brand-soft); color: var(--ink); } .win-side a.on i { background: var(--brand); box-shadow: 0 0 10px var(--brand); }
+  .win-side a b { margin-left: auto; font-weight: 500; font-size: 12px; color: var(--muted); font-family: var(--mono); }
+  .win-main { position: relative; display: grid; place-items: center; padding: 18px 24px 8px; background: radial-gradient(520px 300px at 60% 45%, color-mix(in srgb, var(--brand) 10%, transparent), transparent 70%); }
+  .hero-art { width: 100%; max-width: 600px; }
   .hero-art svg { width: 100%; height: auto; display: block; overflow: visible; }
+
+  /* แถบเครื่องมือที่ใช้ร่วมได้ เลื่อนวนช้า ๆ ขอบซ้ายขวาจางหาย */
+  .works { margin-top: 56px; text-align: center; }
+  .works p { font-size: 14px; color: var(--muted); margin-bottom: 18px; }
+  .marquee { overflow: hidden; -webkit-mask-image: linear-gradient(90deg, transparent, #000 15%, #000 85%, transparent); mask-image: linear-gradient(90deg, transparent, #000 15%, #000 85%, transparent); }
+  .marquee ul { display: flex; gap: 44px; width: max-content; list-style: none; margin: 0; padding: 0; animation: slide 36s linear infinite; }
+  .marquee li { font-family: var(--display); font-size: 20px; font-weight: 600; letter-spacing: -.02em; color: color-mix(in srgb, var(--ink) 55%, transparent); white-space: nowrap; display: inline-flex; align-items: center; gap: 10px; }
+  .marquee li::before { content: ""; width: 7px; height: 7px; border-radius: 2px; background: currentColor; opacity: .6; transform: rotate(45deg); }
+  @keyframes slide { to { transform: translateX(-50%); } }
 
   /* svg tokens: ทำงานได้ทั้งสองธีม */
   .s-surface { fill: var(--surface); }
@@ -89,7 +114,7 @@
   .step { position: relative; padding: 24px; }
   .step-art { height: 120px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--line); margin-bottom: 20px; display: grid; place-items: center; overflow: hidden; }
   .step-art svg { width: 100%; max-width: 260px; height: 100px; }
-  .step-num { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; font-size: 14px; font-weight: 700; color: #fff; background: linear-gradient(135deg, #2563eb, #0e9f8e); margin-bottom: 12px; font-family: var(--mono); }
+  .step-num { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; font-size: 14px; font-weight: 700; color: #fff; background: linear-gradient(135deg, var(--grad-a), var(--grad-b)); margin-bottom: 12px; font-family: var(--mono); }
   .step h3 { font-size: 18px; margin-bottom: 6px; }
   .step p { margin: 0; color: var(--muted); font-size: 15.5px; }
   .step:not(:last-child)::after { content: ""; position: absolute; top: 84px; right: -16px; width: 12px; height: 12px; border-top: 2px solid var(--line-2); border-right: 2px solid var(--line-2); transform: rotate(45deg); z-index: 1; }
@@ -158,8 +183,9 @@
 
   /* ── responsive ── */
   @media (max-width: 1024px) {
-    .hero-grid { grid-template-columns: minmax(0, 1fr); gap: 32px; }
-    .hero-art { max-width: 620px; margin: 0 auto; width: 100%; }
+    .win-body { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+    .win-side { display: none; }
+    .hero-show .frame { transform: none; }
     .features { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .api-grid { grid-template-columns: minmax(0, 1fr); }
     .sec-grid { grid-template-columns: minmax(0, 1fr); gap: 32px; }
@@ -210,8 +236,8 @@
 
   <!-- 1 · HERO -->
   <section class="hero" aria-labelledby="hero-title">
-    <div class="wrap hero-grid">
-      <div>
+    <canvas class="fx" data-fx="silk" aria-hidden="true"></canvas>
+    <div class="wrap hero-center">
         <p class="pill"><b data-i18n="pillTag">ใหม่</b><span data-i18n="pill">โฮสต์เอง ข้อมูลอยู่บนเซิร์ฟเวอร์ของเรา</span></p>
         <h1 id="hero-title"><span data-i18n="h1a">สมองที่สองของทีม จำทุกอย่างตามจริง</span> <span class="l2 grad-text" data-i18n="h1b">ตอบเมื่อรู้ บอกเมื่อไม่รู้</span></h1>
         <p class="lede" data-i18n="lede">panya เก็บความจำของทีมแบบคำต่อคำ ค้นได้ทั้งภาษาไทยและอังกฤษ และไม่เดาคำตอบเอง ถ้าไม่มีข้อมูลจริงก็จะบอกตรง ๆ ว่าไม่รู้</p>
@@ -227,8 +253,25 @@
           <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg><span data-i18n="meta2">REST API ใช้ได้ทุกภาษา</span></li>
           <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg><span data-i18n="meta3">ไม่รับเก็บความลับ</span></li>
         </ul>
-      </div>
+    </div>
 
+    <div class="wrap hero-show" id="hero-show"><div class="frame"><div class="frame-in">
+      <div class="win-top" aria-hidden="true"><span class="dots"><i></i><i></i><i></i></span>
+        <span class="url"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>panya.toptierdigital.space</span></div>
+      <div class="win-body">
+        <aside class="win-side" aria-hidden="true">
+          <span class="ws-q"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span data-i18n="wsSearch">ค้นหา</span><kbd>K</kbd></span>
+          <span class="ws-h" data-i18n="wsBrains">สมอง</span>
+          <a class="on"><i></i>team-notes<b>1,284</b></a>
+          <a><i></i>claude-memory<b>5,543</b></a>
+          <a><i></i>claude-skills<b>46k</b></a>
+          <a><i></i>research<b>44</b></a>
+          <span class="ws-h" data-i18n="wsViews">มุมมอง</span>
+          <a><i></i><span data-i18n="wsDash">แดชบอร์ด</span></a>
+          <a><i></i><span data-i18n="wsBrain3d">สมอง 3 มิติ</span></a>
+          <a><i></i><span data-i18n="wsApi">บัญชีและ API</span></a>
+        </aside>
+        <div class="win-main">
       <div class="hero-art">
         <svg viewBox="0 0 560 470" role="img" aria-labelledby="hero-art-t">
           <title id="hero-art-t" data-i18n="artAlt">ภาพประกอบ: ความจำไหลเข้าสมองที่เป็นเครือข่ายโหนด และคำค้นทำให้โหนดที่ตรงกันสว่างขึ้น</title>
@@ -300,6 +343,16 @@
           <path class="s-edge flow" d="M398 278C410 330 430 360 430 396"/>
         </svg>
       </div>
+        </div>
+      </div>
+    </div></div></div>
+
+    <div class="wrap works">
+      <p data-i18n="worksT">ใช้ร่วมกับเครื่องมือที่ทีมใช้อยู่แล้ว</p>
+      <div class="marquee" aria-hidden="true"><ul>
+        <li>Claude Code</li><li>Claude Desktop</li><li>MCP</li><li>Cursor</li><li>REST API</li><li>curl</li><li>Python</li><li>Node.js</li><li>Bun</li><li>n8n</li>
+        <li>Claude Code</li><li>Claude Desktop</li><li>MCP</li><li>Cursor</li><li>REST API</li><li>curl</li><li>Python</li><li>Node.js</li><li>Bun</li><li>n8n</li>
+      </ul></div>
     </div>
   </section>
 
@@ -312,32 +365,32 @@
         <p data-i18n="fSub">ออกแบบมาให้ทั้งคนและ AI agent ใช้ร่วมกัน ข้อมูลที่เก็บคือข้อมูลที่ได้กลับ ไม่มีอะไรถูกเขียนใหม่ระหว่างทาง</p>
       </div>
       <div class="features">
-        <article class="card feature">
+        <article class="card feature spot">
           <div class="ficon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4h7l4 4v12H7z"/><path d="M14 4v4h4M10 12h5M10 15.5h5"/><path d="M4 8v12"/></svg></div>
           <h3 data-i18n="f1t">เก็บตามจริง ไม่แต่งเติม</h3>
           <p data-i18n="f1d">ข้อความถูกเก็บแบบคำต่อคำ ไม่มี LLM มาสรุปหรือเขียนใหม่ ค้นเจอเมื่อไรก็ได้ข้อความเดิมทุกตัวอักษร</p>
         </article>
-        <article class="card feature">
+        <article class="card feature spot">
           <div class="ficon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.3a2.6 2.6 0 0 1 5 .9c0 1.7-2.5 2.2-2.5 3.6"/><circle cx="12" cy="17" r=".6" fill="currentColor"/></svg></div>
           <h3 data-i18n="f2t">ไม่รู้ก็บอกว่าไม่รู้</h3>
           <p data-i18n="f2d">ถ้าไม่มีความจำไหนตรงกับคำถามพอ panya จะตอบว่า <code>abstained: true</code> แทนการยัดผลลัพธ์ที่ไม่เกี่ยวมาให้</p>
         </article>
-        <article class="card feature">
+        <article class="card feature spot">
           <div class="ficon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h12l-3-3M20 16H8l3 3"/></svg></div>
           <h3 data-i18n="f3t">ค่าใหม่แทนค่าเก่าอัตโนมัติ</h3>
           <p data-i18n="f3d">ระบุ subject กับ attribute แล้วเมื่อข้อมูลเรื่องเดียวกันเปลี่ยน ค่าล่าสุดจะแทนที่ค่าเก่าให้เอง ไม่ต้องตามลบ</p>
         </article>
-        <article class="card feature">
+        <article class="card feature spot">
           <div class="ficon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/><path d="M7.5 10.5h6M10.5 7.5c1.3 1.6 1.3 4.4 0 6"/></svg></div>
           <h3 data-i18n="f4t">ค้นได้ทั้งไทยและอังกฤษ</h3>
           <p data-i18n="f4d">ค้นแบบผสมทั้งความหมาย (embedding) และคำตรงตัว ตัดคำไทยได้ถูก ถามเป็นไทยก็เจอข้อความภาษาอังกฤษได้</p>
         </article>
-        <article class="card feature">
+        <article class="card feature spot">
           <div class="ficon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="3"/><path d="M3 19c0-2.8 2.2-5 5-5s5 2.2 5 5"/><circle cx="17" cy="9" r="2.5"/><path d="M15 14.4c.6-.3 1.3-.4 2-.4 2.2 0 4 1.8 4 4"/></svg></div>
           <h3 data-i18n="f5t">สมองของแต่ละคน แชร์ให้อ่านได้</h3>
           <p data-i18n="f5d">ทุกคนมีสมองของตัวเอง เจ้าของเลือกได้ว่าจะแชร์ให้ใครอ่าน คนที่ได้รับแชร์อ่านได้อย่างเดียว แก้ไม่ได้</p>
         </article>
-        <article class="card feature">
+        <article class="card feature spot">
           <div class="ficon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/></svg></div>
           <h3 data-i18n="f6t">ภาพสามมิติ: แดชบอร์ด สมอง คลังสินค้า</h3>
           <p data-i18n="f6d">ดูความจำเป็นภาพสามมิติได้สามมุม ทั้งแดชบอร์ดภาพรวม แผนที่สมอง และคลังสินค้าที่จัดความจำเป็นชั้นวาง</p>
@@ -584,11 +637,12 @@
   const T = {
     th: {
       pillTag: 'โฮสต์เอง', pill: 'ข้อมูลทั้งหมดอยู่บนเซิร์ฟเวอร์ของเรา',
-      h1a: 'สมองที่สองของทีม จำทุกอย่างตามจริง', h1b: 'ตอบเมื่อรู้ บอกเมื่อไม่รู้',
+      h1a: 'สมองที่สองของทีม', h1b: 'ตอบเมื่อรู้ บอกเมื่อไม่รู้',
       lede: 'panya เก็บความจำของทีมแบบคำต่อคำ ค้นได้ทั้งภาษาไทยและอังกฤษ และไม่เดาคำตอบเอง ถ้าไม่มีข้อมูลจริงก็จะบอกตรง ๆ ว่าไม่รู้',
       ctaLogin: 'เข้าสู่ระบบ', ctaDash: 'ไปที่แดชบอร์ด', ctaApi: 'ดูวิธีใช้ API',
       meta1: 'ไม่ใช้ AI แต่งข้อความ', meta2: 'REST API ใช้ได้ทุกภาษา', meta3: 'ไม่รับเก็บความลับ',
       artAlt: 'ภาพประกอบ: ความจำไหลเข้าสมองที่เป็นเครือข่ายโหนด และคำค้นทำให้โหนดที่ตรงกันสว่างขึ้น',
+      wsSearch: 'ค้นหา', wsBrains: 'สมอง', wsViews: 'มุมมอง', wsDash: 'แดชบอร์ด', wsBrain3d: 'สมอง 3 มิติ', wsApi: 'บัญชีและ API', worksT: 'ใช้ร่วมกับเครื่องมือที่ทีมใช้อยู่แล้ว',
       artQ: 'ประชุมทีมวันไหน', artGo: 'ค้นหา', artHit: 'ข้อความเดิม · คะแนน 0.91', artAns: 'ประชุมทีมทุกวันจันทร์ 10 โมง',
 
       fEyebrow: 'ความสามารถ', fTitle: 'ความจำที่ทีมเชื่อได้ เพราะไม่มีการแต่งเติม',
@@ -640,11 +694,12 @@
     },
     en: {
       pillTag: 'Self-hosted', pill: 'Your data stays on our own server',
-      h1a: 'Your team’s second brain remembers exactly.', h1b: 'Answers when it knows. Admits when it doesn’t.',
+      h1a: 'Your team’s second brain.', h1b: 'Honest by design.',
       lede: 'panya stores your team’s memories word for word, searches them in Thai and English, and never makes up an answer. If nothing real matches, it says so.',
       ctaLogin: 'Sign in', ctaDash: 'Go to dashboard', ctaApi: 'See the API',
       meta1: 'No AI rewriting', meta2: 'Plain REST API', meta3: 'Refuses to store secrets',
       artAlt: 'Illustration: memories flow into a brain made of connected nodes, and a search query lights up the matching ones',
+      wsSearch: 'Search', wsBrains: 'Brains', wsViews: 'Views', wsDash: 'Dashboard', wsBrain3d: '3D brain', wsApi: 'Account & API', worksT: 'Works with the tools your team already uses',
       artQ: 'When do we meet?', artGo: 'Search', artHit: 'Original text · score 0.91', artAns: 'Team meeting: Mondays, 10 am',
 
       fEyebrow: 'Features', fTitle: 'Memory your team can trust, because nothing is made up',
@@ -776,6 +831,9 @@
   applyAll()
   if (document.fonts) document.fonts.ready.then(applyAll)
   document.addEventListener('panya:lang', applyAll)
+  // กรอบโชว์หน้าแอปเอียงอยู่ แล้วตั้งตรงเมื่อเลื่อนมาเห็น
+  const show = document.getElementById('hero-show')
+  new IntersectionObserver(([e], io) => { if (e.intersectionRatio > 0.25) { show.classList.add('in'); io.disconnect() } }, { threshold: [0, 0.25, 0.5] }).observe(show)
 })()
 </script>
 </body>
