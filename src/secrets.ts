@@ -30,7 +30,7 @@ const PROVIDERS: [string, RegExp][] = [
 const KEYWORD = /(?:pass(?:word|wd|phrase)?|pwd|secret|api[_ -]?key|access[_ -]?key|private[_ -]?key|client[_ -]?secret|auth[_ -]?token|access[_ -]?token|refresh[_ -]?token|token|รหัสผ่าน|พาสเวิร์ด|คีย์)(?:\s+[^\s:=]{1,20}){0,2}\s*(?:คือ|=|:|:=|=>|เป็น)\s*["'`]?([^\s"'`,;]{6,})/gi
 
 // ค่าที่เป็นตัวอย่างหรือที่ว่าง ไม่ใช่ความลับจริง: <your-key>, ${VAR}, xxx, ****, your_password, changeme
-const PLACEHOLDER = /^(?:<[^>]*>?|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?|%[A-Za-z_]+%|\{\{.*\}\}|x{3,}.*|\*{3,}.*|\.{3,}.*|(?:your|my|the|example|sample|dummy|fake|test)[_-]?\w*|changeme|redacted|hidden|null|none|undefined|placeholder|process\.env\.\w+|env\.\w+|os\.environ.*|config\.\w+.*|getenv.*)$/i
+const PLACEHOLDER = /^(?:<[^>]*>?|\$\{.*|\$[A-Za-z_][A-Za-z0-9_]*|%[A-Za-z_]+%|\{\{.*\}\}|x{3,}.*|\*{3,}.*|\.{3,}.*|(?:your|my|the|example|sample|dummy|fake|test)[_-]?\w*|changeme|redacted|hidden|null|none|undefined|placeholder|process\.env\.\w+|env\.\w+|os\.environ.*|config\.\w+.*|getenv.*)$/i
 
 /** คืนกฎแรกที่ตรง หรือ null เมื่อไม่พบความลับ */
 export function findSecret(text: string): SecretHit | null {

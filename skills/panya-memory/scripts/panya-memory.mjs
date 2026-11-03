@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 // รับ-ส่ง memory ของ Claude Code กับ panya ผ่าน HTTP API · ใช้ Node 18+ อย่างเดียว ไม่มี dependency
-//   node panya-memory.mjs setup --url http://host:6800 --key <api key>
+//   node panya-memory.mjs setup --url https://panya.toptierdigital.space --key <api key>
 //   node panya-memory.mjs push [--project <ชื่อโฟลเดอร์โปรเจกต์>] [--dry]
-//   node panya-memory.mjs search <คำถาม> [--limit 8]
+//   node panya-memory.mjs search <คำถาม> [--limit 8] [--as-of 2026-01-31]
+//   node panya-memory.mjs context [--days 30]
+//   node panya-memory.mjs history <subject> <attribute>
 //   node panya-memory.mjs remember <ข้อความ> [--subject s --attribute a] [--kind fact|preference|event] [--source s]
 //   node panya-memory.mjs list [คำกรอง]
 //   node panya-memory.mjs show <โปรเจกต์>/<ชื่อความจำ>
@@ -15,11 +17,13 @@ import { basename, join } from 'node:path'
 const CLAUDE = join(homedir(), '.claude')
 const CONFIG = join(CLAUDE, 'panya.json')
 const PREFIX = 'claude-memory/'
+// panya บนคลาวด์ (AWS กรุงเทพ ผ่าน Cloudflare) · เปลี่ยนได้ด้วย setup --url หรือตัวแปร PANYA_URL
+const DEFAULT_URL = 'https://panya.toptierdigital.space'
 
 // ── อาร์กิวเมนต์ ──────────────────────────────────────────────────
 const argv = process.argv.slice(2)
 const cmd = argv[0]
-const VALUE_FLAGS = new Set(['--url', '--key', '--brain', '--project', '--to', '--limit', '--subject', '--attribute', '--kind', '--source'])
+const VALUE_FLAGS = new Set(['--url', '--key', '--brain', '--project', '--to', '--limit', '--subject', '--attribute', '--kind', '--source', '--as-of', '--days'])
 const flags = {}, words = []
 for (let i = 1; i < argv.length; i++) {
   if (VALUE_FLAGS.has(argv[i])) flags[argv[i].slice(2)] = argv[++i]
@@ -27,12 +31,14 @@ for (let i = 1; i < argv.length; i++) {
   else words.push(argv[i])
 }
 const brain = flags.brain || 'claude-memory'
-const fail = (msg) => { console.error(msg); process.exit(1) }
+// โยนแล้วจบที่ท้ายไฟล์ ไม่เรียก process.exit ตรง ๆ: บน Windows การปิดทันทีขณะ fetch ยังถือ socket อยู่ทำให้ Node แครช (UV_HANDLE_CLOSING)
+class Fail extends Error {}
+const fail = (msg) => { throw new Fail(msg) }
 
 // ── การเชื่อมต่อ: ตัวแปรแวดล้อมมาก่อน แล้วจึงไฟล์ ~/.claude/panya.json ──
 async function config() {
   const file = JSON.parse(await readFile(CONFIG, 'utf8').catch(() => '{}'))
-  const url = (process.env.PANYA_URL || file.url || 'http://127.0.0.1:6800').replace(/\/+$/, '')
+  const url = (process.env.PANYA_URL || file.url || DEFAULT_URL).replace(/\/+$/, '')
   const key = process.env.PANYA_API_KEY || file.key
   if (!key) fail(`ยังไม่ได้ตั้งค่า API key · รัน: node ${basename(process.argv[1])} setup --url <url> --key <key>  (หรือตั้ง PANYA_URL และ PANYA_API_KEY)`)
   return { url, key }
@@ -49,6 +55,32 @@ async function call(method, path, body) {
   return res.json()
 }
 const q = (o) => '?' + new URLSearchParams(o)
+// เหมือน call แต่ไม่จบโปรแกรมเมื่อเซิร์ฟเวอร์ตอบ error (ใช้ตอนต้องตัดสินใจเองว่าจะทำอะไรต่อ)
+async function tryCall(method, path, body) {
+  conn ??= await config()
+  const res = await fetch(conn.url + path, {
+    method,
+    headers: { authorization: 'Bearer ' + conn.key, ...(body ? { 'content-type': 'application/json' } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  }).catch((e) => fail(`ติดต่อ panya ที่ ${conn.url} ไม่ได้: ${e.cause?.code || e.message}`))
+  return { ok: res.ok, status: res.status, data: await res.json().catch(() => ({})) }
+}
+const isSecretRefusal = (r) => r.status === 400 && /never stores secrets/.test(r.data?.error || '')
+// ส่งเป็นชุด · ถ้าเซิร์ฟเวอร์ปฏิเสธเพราะเจอสิ่งที่ดูเหมือนความลับ ให้ส่งทีละรายการและข้ามเฉพาะรายการนั้น ไม่ทิ้งทั้งชุด
+async function sendBatch(memories) {
+  const r = await tryCall('POST', '/v1/memories/batch', { brain, memories })
+  if (r.ok) return { sent: memories.length, refused: [] }
+  if (!isSecretRefusal(r)) fail(`panya ตอบ ${r.status}: ${r.data?.error || ''}`)
+  const refused = []
+  let sent = 0
+  for (const m of memories) {
+    const one = await tryCall('POST', '/v1/memories', { brain, ...m })
+    if (one.ok) sent++
+    else if (isSecretRefusal(one)) refused.push(m.source || m.subject || m.text.slice(0, 40))
+    else fail(`panya ตอบ ${one.status}: ${one.data?.error || ''}`)
+  }
+  return { sent, refused }
+}
 
 // ── แปลงไฟล์ความจำเป็นชิ้น (ตรงกับ src/import-md.ts ของ panya) ──────
 function parse(raw, fallbackName) {
@@ -107,9 +139,9 @@ async function rebuild(entry) {
 // ── คำสั่ง ─────────────────────────────────────────────────────────
 const commands = {
   async setup() {
-    if (!flags.url || !flags.key) fail('ใช้: setup --url http://host:6800 --key <api key>')
+    if (!flags.key) fail('ใช้: setup --key <api key จากหน้า บัญชีและ API> [--url https://panya.toptierdigital.space]')
     await mkdir(CLAUDE, { recursive: true })
-    await writeFile(CONFIG, JSON.stringify({ url: flags.url.replace(/\/+$/, ''), key: flags.key }, null, 2) + '\n', { mode: 0o600 })
+    await writeFile(CONFIG, JSON.stringify({ url: (flags.url || DEFAULT_URL).replace(/\/+$/, ''), key: flags.key }, null, 2) + '\n', { mode: 0o600 })
     const s = await call('GET', '/v1/stats' + q({ brain }))
     console.log(`บันทึกการเชื่อมต่อไว้ที่ ${CONFIG} · brain "${brain}" มี ${s.memories} ความจำ`)
   },
@@ -135,17 +167,39 @@ const commands = {
     if (flags.dry) return console.log('โหมด --dry: ไม่ได้ส่งอะไร')
     // ส่งซ้ำได้: ของเดิมจากไฟล์เดียวกันถูกลบก่อน แล้วจึงใส่ใหม่
     for (const source of sources) await call('DELETE', '/v1/sources' + q({ brain, source }))
+    const refused = []
     for (let i = 0; i < inputs.length; i += 100) {
-      await call('POST', '/v1/memories/batch', { brain, memories: inputs.slice(i, i + 100) })
+      refused.push(...(await sendBatch(inputs.slice(i, i + 100))).refused)
       process.stdout.write(`\rส่งแล้ว ${Math.min(i + 100, inputs.length)}/${inputs.length}`)
     }
     console.log(inputs.length ? '\nเสร็จ' : 'ไม่มีอะไรให้ส่ง')
+    // panya ไม่เก็บความลับ: ชิ้นที่ดูเหมือนรหัสผ่าน/key/token ถูกปฏิเสธ ให้แก้ไฟล์ต้นทางแล้วส่งใหม่ถ้าต้องการ
+    if (refused.length) console.log(`ข้าม ${refused.length} ชิ้นที่ดูเหมือนมีความลับ:\n  ` + [...new Set(refused)].join('\n  '))
+  },
+
+  // บริบทตั้งต้น: ค่าปัจจุบันของทุกคีย์ ความชอบ และความจำล่าสุด (ข้อความพร้อมใช้)
+  async context() {
+    conn ??= await config()
+    const res = await fetch(conn.url + '/v1/context' + q({ brain, format: 'text', days: flags.days || 30 }), { headers: { authorization: 'Bearer ' + conn.key } })
+      .catch((e) => fail(`ติดต่อ panya ที่ ${conn.url} ไม่ได้: ${e.cause?.code || e.message}`))
+    if (!res.ok) fail(`panya ตอบ ${res.status}: ${(await res.json().catch(() => ({}))).error || ''}`)
+    console.log(await res.text())
+  },
+
+  // ทุกรุ่นของคีย์หนึ่ง ใหม่สุดก่อน รวมค่าที่ถูกแทนแล้ว
+  async history() {
+    if (words.length < 2) fail('ใช้: history <subject> <attribute>')
+    const r = await call('GET', '/v1/history' + q({ brain, subject: words[0], attribute: words[1] }))
+    if (!r.versions.length) return console.log('ไม่มีประวัติของคีย์นี้')
+    for (const m of r.versions) console.log(`${new Date(m.createdAt).toISOString().slice(0, 10)} ${m.active ? '(ปัจจุบัน)' : `(ถูกแทน ${m.invalidAt ? new Date(m.invalidAt).toISOString().slice(0, 10) : ''})`} ${m.text}`)
   },
 
   async search() {
     const query = words.join(' ')
     if (!query) fail('ใช้: search <คำถาม>')
-    const r = await call('POST', '/v1/search', { brain, q: query, limit: Math.max(1, Math.min(20, Number(flags.limit) || 8)) })
+    const body = { brain, q: query, limit: Math.max(1, Math.min(20, Number(flags.limit) || 8)) }
+    if (flags['as-of']) body.asOf = flags['as-of'] // ค้นเหมือนย้อนไป ณ วันนั้น
+    const r = await call('POST', '/v1/search', body)
     if (r.abstained) return console.log(`panya เลือกไม่ตอบ: ไม่มีความจำที่เกี่ยวข้องพอ (${r.reason || 'no_match'}) · ถือว่าไม่รู้ อย่าเดา`)
     for (const h of r.hits) console.log(`[${h.score.toFixed(2)}] ${h.source || h.subject || '-'}\n${h.text}\n`)
   },
@@ -154,7 +208,10 @@ const commands = {
   async remember() {
     const text = words.join(' ')
     if (!text) fail('ใช้: remember <ข้อความ> [--subject s --attribute a] [--kind fact|preference|event]')
-    const r = await call('POST', '/v1/memories', { brain, text, subject: flags.subject, attribute: flags.attribute, kind: flags.kind, source: flags.source })
+    const r = await tryCall('POST', '/v1/memories', { brain, text, subject: flags.subject, attribute: flags.attribute, kind: flags.kind, source: flags.source })
+    if (isSecretRefusal(r)) fail('panya ไม่เก็บ: ข้อความนี้ดูเหมือนมีรหัสผ่าน key หรือ token · เอาความลับออกแล้วส่งใหม่')
+    if (!r.ok) fail(`panya ตอบ ${r.status}: ${r.data?.error || ''}`)
+    r.action = r.data.action; r.memory = r.data.memory
     console.log(`${{ created: 'เก็บใหม่', superseded: 'แทนค่าเดิม', merged: 'รวมกับที่ซ้ำ' }[r.action]} · id ${r.memory.id}`)
   },
 
@@ -193,5 +250,12 @@ const commands = {
   },
 }
 
-if (!commands[cmd]) fail('คำสั่ง: setup | push | search | remember | list | show | pull   (ดูวิธีใช้ที่หัวไฟล์)')
-await commands[cmd]()
+if (!commands[cmd]) {
+  console.error('คำสั่ง: setup | push | search | context | history | remember | list | show | pull   (ดูวิธีใช้ที่หัวไฟล์)')
+  process.exitCode = 1
+} else try {
+  await commands[cmd]()
+} catch (e) {
+  console.error(e instanceof Fail ? e.message : e)
+  process.exitCode = 1
+}

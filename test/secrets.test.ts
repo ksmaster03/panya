@@ -30,6 +30,8 @@ describe('ไม่จับข้อความทั่วไป', () => {
     'password: required (อย่างน้อย 10 ตัว)',
     'ตั้งค่า PANYA_API_KEYS=<your-key> ใน .env',
     'api_key: ${API_KEY}',
+    'console.error(ข้าม token: ${[...new Set(refused)].join(", ")})',
+    'const auth = { token: $TOKEN }',
     'password = process.env.DB_PASSWORD',
     'token: xxxxxxxx',
     'secret: ********',

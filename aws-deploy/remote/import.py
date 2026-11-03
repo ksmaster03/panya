@@ -44,17 +44,37 @@ for attempt in range(10):  # เซิร์ฟเวอร์อาจยัง
         print(f'  overview retry {attempt + 1}: {e}', flush=True); time.sleep(30)
 else:
     raise SystemExit('server did not answer /v1/overview')
-if have.get(brain, 0) >= len(live) and not start:
+# ระบุตำแหน่งเริ่ม (แม้เป็น 0) = ตั้งใจนำเข้า เช่นไฟล์ส่วนที่เพิ่มหลังย้ายรอบแรก จึงไม่ข้าม
+if have.get(brain, 0) >= len(live) and len(sys.argv) <= 3:
     print(f'{brain}: already has {have[brain]} of {len(live)}, skipped')
     sys.exit(0)
+
+# panya ไม่เก็บความลับ: ถ้าชุดถูกปฏิเสธเพราะรายการหนึ่งดูเหมือนความลับ ให้ตัดรายการนั้นออกแล้วส่งชุดเดิมใหม่
+SECRET = re.compile(r'memories\[(\d+)\]: refused: .*never stores secrets')
+skipped = []
+
+def post_chunk(memories, first):
+    while memories:
+        body = {'brain': brain, 'memories': memories}
+        if first:
+            body['entities'] = entities
+        try:
+            return post(body)
+        except SystemExit as e:
+            m = SECRET.search(str(e))
+            if not m:
+                raise
+            bad = memories[int(m.group(1))]
+            skipped.append(bad.get('source') or bad.get('subject') or bad['text'][:60])
+            memories = memories[:int(m.group(1))] + memories[int(m.group(1)) + 1:]
+    return {}
 
 t0 = time.time()
 done = start
 for i in range(start, len(live), CHUNK):
-    body = {'brain': brain, 'memories': live[i:i + CHUNK]}
-    if i == 0:
-        body['entities'] = entities
-    r = post(body)
-    done += len(body['memories'])
+    r = post_chunk(live[i:i + CHUNK], i == 0)
+    done += min(CHUNK, len(live) - i)
     print(f'{brain}: {done}/{len(live)} (+{r.get("created", 0)} new, {r.get("merged", 0)} merged) {time.time() - t0:.0f}s', flush=True)
-print(f'{brain}: imported {done} in {time.time() - t0:.0f}s')
+print(f'{brain}: imported {done - len(skipped)} in {time.time() - t0:.0f}s, skipped {len(skipped)} that look like secrets')
+for s in sorted(set(skipped)):
+    print(f'  skipped (secret-like): {s}')
