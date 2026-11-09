@@ -36,6 +36,19 @@ export const config = {
     // จำนวนผู้สมัครอันดับต้น (ตามคะแนนเดิม) ที่ส่งให้จัดอันดับซ้ำ เวลาที่ใช้เพิ่มตามจำนวนนี้
     top: num(process.env.PANYA_RERANK_TOP, 10),
   },
+  // ผู้คุมสมอง (src/governor.ts): ติดป้ายหมวดปัญญา 3 ให้ความจำที่ไม่ได้ระบุหมวด ไม่แก้ข้อความ
+  // proto = เทียบเวกเตอร์ที่มีอยู่แล้ว ไม่เพิ่มเวลา (ค่าเริ่มต้น) · ollama = โมเดลภาษาในเครื่อง ช้ากว่า · off = ไม่ติดป้าย
+  // ตอนบันทึกใช้ proto เสมอ เพื่อไม่ให้การเขียนต้องรอ LLM · โหมด ollama ใช้กับงานติดป้ายย้อนหลัง (bun run govern)
+  governor: {
+    mode: (['off', 'ollama'].includes(process.env.PANYA_GOVERNOR ?? '') ? process.env.PANYA_GOVERNOR : 'proto') as 'off' | 'proto' | 'ollama',
+    ollamaUrl: process.env.PANYA_OLLAMA_URL ?? 'http://127.0.0.1:11434',
+    model: process.env.PANYA_GOVERNOR_MODEL ?? 'qwen3:4b-instruct',
+    timeoutMs: num(process.env.PANYA_GOVERNOR_TIMEOUT_MS, 60_000),
+    // น้ำหนักของคำบ่งชี้เทียบกับความคล้ายของเวกเตอร์ · ปรับจาก bun eval/govern.ts
+    cueWeight: num(process.env.PANYA_GOVERNOR_CUE_WEIGHT, 0.01),
+    // แต้มต่อของหมวดสุตมยเมื่อข้อความไม่มีคำบ่งชี้ของอีกสองหมวด
+    sutaPrior: num(process.env.PANYA_GOVERNOR_SUTA_PRIOR, 0.002),
+  },
   search: {
     // ค่าเหล่านี้ปรับจากชุดทดสอบ (bun run eval) อย่าเดา
     // ใช้เมื่อเปิด reranker: คะแนนสุดท้าย = (1 - rerankWeight) * คะแนนเดิม + rerankWeight * คะแนน reranker

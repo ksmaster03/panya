@@ -85,9 +85,11 @@ Every route under `/v1` needs `Authorization: Bearer <key>`.
 
 | Route | Purpose |
 |---|---|
-| `POST /v1/memories` | Store `{ brain, text, subject?, attribute?, kind?, validUntil?, source?, ref? }` |
+| `POST /v1/memories` | Store `{ brain, text, subject?, attribute?, kind?, validUntil?, source?, ref?, panya? }` |
+| `POST /v1/documents` | Split a long document into chunks and store them: `{ brain, text, source, panya?, max?, overlap?, headings? }`. See [Long documents](#long-documents-and-chunking) |
+| `PATCH /v1/memories/:id` | Set or clear the wisdom label: `{ brain, panya }` |
 | `POST /v1/memories/batch` | Store up to 200 at once: `{ brain, memories: [...] }`. All-or-nothing validation |
-| `POST /v1/search` | `{ brain, q, limit?, minScore?, rerank? }` returns `{ hits, abstained, reason? }`. `rerank: false` skips the optional reranker for this request |
+| `POST /v1/search` | `{ brain, q, limit?, minScore?, rerank?, panya? }` returns `{ hits, abstained, reason? }`. `rerank: false` skips the optional reranker for this request |
 | `GET /v1/graph?brain=` | Nodes with 2D positions and nearest-neighbour edges, for the brain view |
 | `GET /v1/points?brain=` | Every live memory as a 2D point (PCA over all embeddings) with its group and date, plus neighbour edges over a spread-out sample. No memory text. Computed at start-up and cached for 10 minutes |
 | `GET /v1/memories/:id?brain=` | One memory, used to show its text when you point at it on the dashboard |
@@ -165,6 +167,61 @@ Both need only Node 18+. Only `.md` files travel: a skill's scripts and assets a
 5. Score each candidate from normalised similarity and the share of query words it contains. Anything under `minScore` is discarded. No survivors means `abstained: true`.
 
 Thresholds live in `src/config.ts` and come from `bun run eval`, which tunes on half the questions and reports on the other half.
+
+## Three kinds of wisdom (panya 3)
+
+Every memory can carry one of the three kinds of wisdom from Buddhist teaching. The label records where the knowledge came from, not what it is about:
+
+| `panya` | Name | Where the knowledge came from |
+|---|---|---|
+| `suta` | สุตมยปัญญา | Heard or learned: something read, told, documented, a spec or a rule |
+| `cinta` | จินตมยปัญญา | Thought through: analysis, a conclusion, a decision and its reason, a plan |
+| `bhavana` | ภาวนามยปัญญา | Practised: a lesson learned, first-hand experience, what worked when tried |
+
+- Send `panya` with a memory to set the label yourself. A label you set is never overwritten.
+- If you leave it out, the **governor** labels the memory. It only labels; it never writes or changes text.
+- Search with `"panya": "bhavana"` or `"panya": ["suta", "cinta"]` to search one kind only. The brain page has the same filter.
+- `PATCH /v1/memories/:id` with `{ brain, panya }` fixes a label (`""` clears it).
+- Each memory also has `panyaBy` (`user`, `proto` or `llm`) and `panyaConf` (0-1), so you can tell a guess from a label someone chose.
+
+The governor has two modes.
+
+- **proto** (default) compares the memory's embedding, which is already computed when it is stored, with example sentences for each kind, plus a few cue words. It adds about nothing to write time and runs on the 4 GB cloud machine.
+- **ollama** asks a local language model (default `qwen3:4b-instruct`) for one word. It is more accurate but takes 1-3 seconds per memory on a laptop CPU. It is used for relabelling after the fact, never on the write path: `bun run govern <brain> --mode ollama`. Labels set by a user are skipped, and if Ollama fails the memory keeps a proto label.
+
+Settings: `PANYA_GOVERNOR` (`proto`, `ollama` or `off`), `PANYA_OLLAMA_URL`, `PANYA_GOVERNOR_MODEL`.
+
+Measured on 9 November 2026 (`bun eval/govern.ts --ollama`). The fresh set is 30 sentences written after the cue words were fixed and never used for tuning.
+
+| Governor | Holdout (36) | Fresh set (30) | Time per memory |
+|---|---|---|---|
+| proto, embedding only | 67% | not measured | about 20 ms |
+| proto, embedding + cue words | 97% | 77% | about 20 ms |
+| ollama `qwen3:4b-instruct` | 92% | 90% | about 1.7 s |
+
+Read the proto holdout number with care: the cue words were written by someone who had seen those sentences, so the fresh set (77%) is the honest figure. Two things went wrong on the way and are handled in the code. `qwen3:4b` (the thinking model) ignored `think: false` and took about 60 s per memory. Forcing a JSON enum made it answer `suta` for everything.
+
+## Long documents and chunking
+
+`POST /v1/documents` with `{ brain, text, source, panya?, max?, overlap?, headings? }` splits a long Markdown or plain-text document into chunks and stores each one as a memory with `ref = source#n`.
+
+- Chunks never cross a heading. They are built from whole lines or sentences.
+- `headings` (default on) puts the heading path, for example `Branch manual › Bang Na › Opening hours`, in front of each chunk. Text that repeats under several headings then stays tied to its own heading.
+- `overlap` repeats the last sentences of a chunk at the start of the next one.
+- Sending the same `source` again replaces that document's old chunks.
+- If any chunk contains a secret, nothing is stored.
+
+The defaults (`max 300, overlap 120, headings on`) were chosen with `bun eval/chunks.ts`. That run used 4 synthetic documents and 57 questions: 50 have an answer in the text and 7 do not. A chunk counts as relevant when it contains the whole answer span.
+
+| Chunking | R@1 | R@3 | MRR | nDCG@5 | Abstains when no answer |
+|---|---|---|---|---|---|
+| Paragraphs, 700 (the importer for skills and memory files) | 86% | 96% | 0.914 | 0.919 | 29% |
+| Sentences 300, no headings | 80% | 98% | 0.892 | 0.904 | 71% |
+| **Sentences 300, overlap 120, headings** | **92%** | **100%** | **0.957** | **0.944** | **71%** |
+
+The Claude Code memory and skill importers keep the paragraph chunker on purpose. Those memories must be rebuilt into the original file byte for byte, and headings and overlap would break that. The set is small and the defaults were picked on it, so check them on your own documents.
+
+`bun eval/run.ts` now also reports MRR and nDCG@5 next to the rank-1 and top-3 numbers.
 
 ## Reranker (optional)
 

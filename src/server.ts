@@ -3,6 +3,8 @@ import { getConnInfo } from 'hono/bun'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { config, type SearchTuning } from './config'
 import type { Memory, MemoryStore, RememberInput } from './memory'
+import { isPanya } from './governor'
+import { chunkDoc, type ChunkOptions } from './chunk'
 import { MIN_PASSWORD, ROLES, USERNAME, randomPassword, type KeyLimits, type Role, type User } from './users'
 import { findSecret } from './secrets'
 import { mountMcp } from './mcp'
@@ -49,8 +51,11 @@ export function isPrivateAddress(raw: string | undefined): boolean {
 }
 
 const KINDS = new Set(['fact', 'preference', 'event'])
+const PANYA_BY = new Set(['user', 'proto', 'llm'])
 const BRAIN_NAME = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/
 const IMPORT_MAX = 5000
+// เอกสารยาวหนึ่งฉบับ (ตัวอักษร) ราวหนังสือเล่มบาง
+const DOC_MAX = 500_000
 
 /** สิ่งที่ผู้เรียกเห็น: ใช้คำว่า brain แทน container ที่เป็นชื่อภายใน */
 const present = ({ container, ...m }: Memory) => ({ ...m, brain: container })
@@ -382,6 +387,9 @@ export function createApp(
     if (typeof b?.text !== 'string' || !b.text.trim()) return 'text is required'
     if (b.text.length > 2000) return 'text too long (max 2000): send one fact per memory'
     if (b.kind !== undefined && !KINDS.has(b.kind)) return 'invalid kind'
+    // หมวดปัญญา 3 · ค่าว่างถือว่าไม่ระบุ (ไฟล์ export ของความจำที่ยังไม่มีป้าย)
+    const panya = b.panya === '' || b.panya === undefined || b.panya === null ? undefined : b.panya
+    if (panya !== undefined && !isPanya(panya)) return 'invalid panya (suta, cinta or bhavana)'
     for (const f of ['subject', 'attribute', 'source', 'ref']) {
       if (b[f] !== undefined && (typeof b[f] !== 'string' || b[f].length > 191)) return `invalid ${f}`
     }
@@ -400,7 +408,10 @@ export function createApp(
       now = typeof b.createdAt === 'number' ? b.createdAt : Date.parse(b.createdAt)
       if (!Number.isFinite(now)) return 'invalid createdAt'
     }
-    return { container: brain, text: b.text, subject: b.subject, attribute: b.attribute, kind: b.kind, validUntil, source: b.source, ref: b.ref, now }
+    // นำเข้า: คงที่มาของป้ายเดิม (ผู้คุมสมองติดไว้) ไม่ให้กลายเป็นป้ายที่ผู้ใช้ระบุ
+    const panyaBy = keepTime && panya && PANYA_BY.has(b.panyaBy) ? b.panyaBy : undefined
+    const panyaConf = panyaBy && typeof b.panyaConf === 'number' && b.panyaConf >= 0 && b.panyaConf <= 1 ? b.panyaConf : undefined
+    return { container: brain, text: b.text, subject: b.subject, attribute: b.attribute, kind: b.kind, validUntil, source: b.source, ref: b.ref, panya, panyaBy, panyaConf, now }
   }
 
   const parseMany = (brain: string, list: unknown, max: number, keepTime = false): string | RememberInput[] => {
@@ -458,11 +469,14 @@ export function createApp(
       asOf = typeof b.asOf === 'number' ? b.asOf : Date.parse(b.asOf)
       if (!Number.isFinite(asOf)) return c.json({ error: 'invalid asOf (epoch ms or ISO 8601)' }, 400)
     }
+    // panya: กรองตามหมวดปัญญา 3 รับค่าเดียวหรือหลายค่า
+    const panyaList = b.panya === undefined ? [] : Array.isArray(b.panya) ? b.panya : [b.panya]
+    if (!panyaList.every(isPanya)) return c.json({ error: 'panya must be suta, cinta, bhavana or a list of them' }, 400)
     const t0 = performance.now()
     // rerank: false = ข้าม reranker สำหรับคำขอนี้ (เมื่อผู้เรียกต้องการความเร็วมากกว่าความแม่น)
     const r = await store.search(brain, b.q, {
       limit, tuning, rerank: b.rerank === false ? false : undefined, asOf,
-      includeSuperseded: b.includeSuperseded === true, explain: b.explain === true,
+      includeSuperseded: b.includeSuperseded === true, explain: b.explain === true, panya: panyaList,
     })
     const ms = Math.round(performance.now() - t0)
     recordSearch(brain, ms, r.abstained)
@@ -636,6 +650,7 @@ export function createApp(
     const memories = (await store.exportAll(brain, { history })).map((m) => ({
       text: m.text, subject: m.subject, attribute: m.attribute, kind: m.kind, source: m.source, ref: m.ref,
       createdAt: m.createdAt, validUntil: m.validUntil, count: m.count, active: m.active,
+      panya: m.panya, panyaBy: m.panyaBy, panyaConf: m.panyaConf,
     }))
     c.header('content-disposition', `attachment; filename="panya-${brain}.json"`)
     return c.json({ format: 'panya-export', version: 1, brain, exportedAt: new Date().toISOString(), entities: await store.entities.list(brain), memories })
@@ -664,6 +679,36 @@ export function createApp(
     return c.json({ brain, imported: inputs.length, ...counts }, 201)
   })
 
+  // ── เอกสารยาว ───────────────────────────────────────────────────
+  // { brain, text, source, panya?, max?, overlap?, headings? } ตัดเอกสารเป็นท่อนด้วย chunkDoc แล้วเก็บเป็นความจำ
+  // ทุกท่อนมี source เดียวกันและ ref = source#ลำดับ · ส่ง source เดิมซ้ำ = แทนที่ท่อนชุดเก่าทั้งหมด
+  // ทุกท่อนผ่านกฎเดียวกับความจำทั่วไป ถ้าท่อนใดมีความลับ จะไม่บันทึกอะไรเลย
+  app.post('/v1/documents', async (c) => {
+    const b = await c.req.json().catch(() => null)
+    const brain = brainOf(c.get('wscope'), b?.brain, b?.container)
+    if (!brain) return c.json(denied, 403)
+    if (typeof b.text !== 'string' || !b.text.trim()) return c.json({ error: 'text is required' }, 400)
+    if (b.text.length > DOC_MAX) return c.json({ error: `text too long (max ${DOC_MAX})` }, 400)
+    if (typeof b.source !== 'string' || !b.source.trim() || b.source.length > 160) return c.json({ error: 'source is required (max 160): it names the document so it can be replaced later' }, 400)
+    const opts: ChunkOptions = {}
+    if (b.max !== undefined) { if (!Number.isInteger(b.max) || b.max < 100 || b.max > 2000) return c.json({ error: 'max must be an integer 100-2000' }, 400); opts.max = b.max }
+    if (b.overlap !== undefined) { if (!Number.isInteger(b.overlap) || b.overlap < 0 || b.overlap > 1000) return c.json({ error: 'overlap must be an integer 0-1000' }, 400); opts.overlap = b.overlap }
+    if (b.headings !== undefined) { if (typeof b.headings !== 'boolean') return c.json({ error: 'headings must be boolean' }, 400); opts.headings = b.headings }
+    const parts = chunkDoc(b.text, opts)
+    if (!parts.length) return c.json({ error: 'document has no text' }, 400)
+    if (parts.length > IMPORT_MAX) return c.json({ error: `document makes too many chunks (${parts.length}, max ${IMPORT_MAX})` }, 400)
+    const inputs = parseMany(brain, parts.map((p, i) => ({ text: p.text, source: b.source, ref: `${b.source}#${i}`, kind: b.kind, panya: b.panya })), IMPORT_MAX)
+    if (typeof inputs === 'string') return c.json({ error: inputs }, 400)
+    changed()
+    await store.forgetSource(brain, b.source)
+    const counts = { created: 0, superseded: 0, merged: 0 }
+    for (let i = 0; i < inputs.length; i += 200) {
+      for (const r of await store.rememberMany(inputs.slice(i, i + 200))) counts[r.action]++
+    }
+    emit({ type: 'in', brain, n: inputs.length, text: snip(b.source), group: groupOfInput(inputs[0]!), ...counts })
+    return c.json({ brain, source: b.source, chunks: parts.length, ...counts }, 201)
+  })
+
   // ── ชื่อเฉพาะ ────────────────────────────────────────────────────
   const strs = (v: unknown) => Array.isArray(v) && v.every((x) => typeof x === 'string' && x.trim() && x.length <= 191)
   const validEntity = (e: any) =>
@@ -683,6 +728,19 @@ export function createApp(
     const brain = brainOf(c.get('scope'), c.req.query('brain'), c.req.query('container'))
     if (!brain) return c.json(denied, 403)
     return c.json({ types: await store.entities.list(brain) })
+  })
+
+  // ── หมวดปัญญา 3 ─────────────────────────────────────────────────
+  // { panya: "suta" | "cinta" | "bhavana" | "" } ผู้ใช้ตั้งหรือแก้ป้ายเอง ป้ายนี้ผู้คุมสมองจะไม่ติดทับ · "" = ล้างป้าย
+  app.patch('/v1/memories/:id', async (c) => {
+    const b = await c.req.json().catch(() => null)
+    const brain = brainOf(c.get('wscope'), b?.brain, b?.container, c.req.query('brain'))
+    if (!brain) return c.json(denied, 403)
+    if (b?.panya !== '' && !isPanya(b?.panya)) return c.json({ error: 'panya must be suta, cinta, bhavana or "" (clear)' }, 400)
+    const m = await store.setPanya(brain, c.req.param('id'), b.panya, 'user', 1)
+    if (!m) return c.json({ error: 'not found' }, 404)
+    changed()
+    return c.json({ memory: present(m) })
   })
 
   // ── ลบ ───────────────────────────────────────────────────────────

@@ -1,0 +1,37 @@
+{
+ "note": "ชุดทดสอบแยก เขียนหลังตั้งคำบ่งชี้ของผู้คุมสมองแล้ว ห้ามใช้ปรับค่า ใช้รายงานผลเท่านั้น · โดเมนต่างจาก panya3.json (อาหาร สุขภาพ การขาย การเงิน งานบ้าน) และเลี่ยงคำบ่งชี้ตรง ๆ",
+ "items": [
+  { "text": "ร้านส่งวัตถุดิบเปลี่ยนวันส่งผักจากวันจันทร์เป็นวันอังคาร", "panya": "suta" },
+  { "text": "หมอฟันนัดตรวจรอบหน้าทุกหกเดือน และให้ใช้ไหมขัดฟันวันละครั้ง", "panya": "suta" },
+  { "text": "The new tax bracket starts at 150,000 baht of net income this year", "panya": "suta" },
+  { "text": "ป้ายในห้างแจ้งว่าที่จอดรถชั้น 3 ปิดปรับปรุงถึงสิ้นเดือน", "panya": "suta" },
+  { "text": "Our landlord mentioned the water bill will be billed separately from January", "panya": "suta" },
+  { "text": "สูตรขนมปังของแม่ใช้แป้ง 500 กรัม ยีสต์ 7 กรัม และน้ำอุ่น 320 มิลลิลิตร", "panya": "suta" },
+  { "text": "Sales director said the Q4 quota is 12 million across the northern region", "panya": "suta" },
+  { "text": "เพื่อนร่วมงานเล่าให้ฟังว่าโปรแกรมบัญชีตัวใหม่ออกใบกำกับภาษีเป็น PDF ได้", "panya": "suta" },
+  { "text": "The museum is closed on Mondays and the last entry is 4:30 pm", "panya": "suta" },
+  { "text": "ในพอดแคสต์ นักเศรษฐศาสตร์บอกว่าดอกเบี้ยนโยบายน่าจะคงที่ทั้งปี", "panya": "suta" },
+
+  { "text": "เทียบแล้วผ่อนรถ 4 ปีดอกเบี้ยรวมน้อยกว่า 6 ปีเกือบสามหมื่น เลยจะเลือก 4 ปี", "panya": "cinta" },
+  { "text": "Moving the standup to 10am makes more sense since half the team starts late", "panya": "cinta" },
+  { "text": "ยอดขายตกน่าจะมาจากคู่แข่งลดราคา ไม่ใช่ตัวสินค้า เพราะยอดลูกค้าเก่ายังเท่าเดิม", "panya": "cinta" },
+  { "text": "งบปีหน้าจะแบ่ง 60% ไปที่โฆษณาออนไลน์ อีก 40% เก็บไว้ทำอีเวนต์", "panya": "cinta" },
+  { "text": "Renting is better than buying for us right now because we may relocate within two years", "panya": "cinta" },
+  { "text": "ถ้าจ้างแม่บ้านสัปดาห์ละครั้ง เวลาที่ได้คืนมาคุ้มกว่าค่าจ้างที่เสียไป", "panya": "cinta" },
+  { "text": "We will offer the annual plan at ten months' price to reduce churn", "panya": "cinta" },
+  { "text": "เมนูใหม่ควรเป็นอาหารจานเดียวราคาไม่เกิน 89 บาท ให้ตรงกับพนักงานออฟฟิศแถวนี้", "panya": "cinta" },
+  { "text": "The spike in errors lines up with the 2am batch job, so that job is the likely culprit", "panya": "cinta" },
+  { "text": "ให้ลูกคนโตรับผิดชอบรดน้ำต้นไม้ ส่วนคนเล็กเก็บของเล่น จะได้ไม่ทะเลาะกัน", "panya": "cinta" },
+
+  { "text": "หมักหมูค้างคืนแล้วนุ่มกว่าหมักสองชั่วโมงเยอะ รอบหน้าจะหมักค้างคืนอีก", "panya": "bhavana" },
+  { "text": "Cold-calling before 9am got almost no answers for me, mid-morning works far better", "panya": "bhavana" },
+  { "text": "วิ่งทุกเช้าสามเดือน ชีพจรตอนพักลดจาก 78 เหลือ 66", "panya": "bhavana" },
+  { "text": "The first time I filed taxes online I missed the deduction form and had to resubmit", "panya": "bhavana" },
+  { "text": "เปิดร้านวันแรกของไม่พอขายตั้งแต่บ่ายสอง วันต่อมาเลยเตรียมของเพิ่มเท่าตัว", "panya": "bhavana" },
+  { "text": "After a few months of journaling every night, I fall asleep faster", "panya": "bhavana" },
+  { "text": "ซ่อมก๊อกน้ำเองครั้งแรกลืมปิดวาล์วใหญ่ น้ำพุ่งเต็มห้องครัว", "panya": "bhavana" },
+  { "text": "Pairing juniors with seniors on real tickets got them productive in two weeks instead of six", "panya": "bhavana" },
+  { "text": "ขายของออนไลน์มาปีหนึ่ง ไลฟ์ตอนสามทุ่มขายดีที่สุดเสมอ", "panya": "bhavana" },
+  { "text": "ปลูกมะเขือเทศในกระถางเล็กแล้วต้นแคระ ย้ายลงแปลงแล้วออกลูกดก", "panya": "bhavana" }
+ ]
+}

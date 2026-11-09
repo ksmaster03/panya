@@ -22,7 +22,10 @@
     "db:up": "docker compose up -d seekdb",
     "db:down": "docker compose stop seekdb",
     "bench": "bun eval/bench.ts",
-    "import:claude-memory": "bun scripts/import-claude-memory.ts"
+    "import:claude-memory": "bun scripts/import-claude-memory.ts",
+    "govern": "bun scripts/govern.ts",
+    "eval:govern": "bun eval/govern.ts",
+    "eval:chunks": "bun eval/chunks.ts"
   },
   "license": "PolyForm-Noncommercial-1.0.0"
 }

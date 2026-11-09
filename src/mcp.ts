@@ -34,6 +34,7 @@ const TOOLS = [
         limit: { type: 'integer', minimum: 1, maximum: 20, description: 'Max results (default 5)' },
         as_of: str('Optional ISO date/time: search as the brain was at that moment'),
         include_superseded: { type: 'boolean', description: 'Also return older values that were replaced' },
+        panya: { type: 'array', items: { type: 'string', enum: ['suta', 'cinta', 'bhavana'] }, description: 'Only these kinds of wisdom: suta = learned from reading/hearing, cinta = from thinking (analysis, decisions, plans), bhavana = from doing (lessons, experience)' },
       },
     },
   },
@@ -48,6 +49,7 @@ const TOOLS = [
         kind: { type: 'string', enum: ['fact', 'preference', 'event'], description: 'fact (default), preference, or event (events fade in ranking over time)' },
         valid_until: str('Optional ISO date/time after which the fact expires'),
         source: str('Optional source (file, URL, ticket)'),
+        panya: { type: 'string', enum: ['suta', 'cinta', 'bhavana'], description: 'Where the knowledge came from: suta = read/heard/told, cinta = own analysis, decision or plan, bhavana = lesson from doing. Omit to let panya label it.' },
       },
     },
   },
@@ -91,18 +93,19 @@ async function runTool(name: string, a: Json, call: Call): Promise<{ text: strin
     const body: Json = { brain: a.brain, q: a.query, limit: a.limit ?? 5 }
     if (a.as_of) body.asOf = a.as_of
     if (a.include_superseded) body.includeSuperseded = true
+    if (Array.isArray(a.panya) && a.panya.length) body.panya = a.panya
     const r = await call('POST', '/v1/search', body); if (r.status !== 200) return fail(r)
     if (r.data.abstained) {
       return { text: r.data.reason === 'unknown_entity'
         ? 'panya does not know: the question names something that never appears in this brain. Say you do not know; do not guess.'
         : 'panya does not know: no memory is relevant enough. Say you do not know; do not guess.' }
     }
-    return { text: (r.data.hits as Json[]).map((h, i) => `${i + 1}. ${keyOf(h)}${h.text}\n   score ${Number(h.score).toFixed(2)} · ${h.kind} · ${day(h.createdAt)}${h.active === false ? ' · REPLACED' : ''}${h.source ? ` · source ${h.source}` : ''} · id ${h.id}`).join('\n') }
+    return { text: (r.data.hits as Json[]).map((h, i) => `${i + 1}. ${keyOf(h)}${h.text}\n   score ${Number(h.score).toFixed(2)} · ${h.kind}${h.panya ? ` · ${h.panya}` : ''} · ${day(h.createdAt)}${h.active === false ? ' · REPLACED' : ''}${h.source ? ` · source ${h.source}` : ''} · id ${h.id}`).join('\n') }
   }
   if (name === 'remember') {
     need('brain', 'text')
     const body: Json = { brain: a.brain, text: a.text }
-    for (const [from, to] of [['subject', 'subject'], ['attribute', 'attribute'], ['kind', 'kind'], ['source', 'source'], ['valid_until', 'validUntil']]) if (a[from!] !== undefined) body[to!] = a[from!]
+    for (const [from, to] of [['subject', 'subject'], ['attribute', 'attribute'], ['kind', 'kind'], ['source', 'source'], ['valid_until', 'validUntil'], ['panya', 'panya']]) if (a[from!] !== undefined) body[to!] = a[from!]
     const r = await call('POST', '/v1/memories', body); if (r.status !== 201 && r.status !== 200) return fail(r) // 200 = รวมกับของเดิม
     const said = { created: 'Stored.', superseded: 'Stored; it replaced the previous value of this key.', merged: 'Already known; merged with the existing memory.' }[r.data.action as string] ?? 'Stored.'
     return { text: `${said} id ${r.data.memory.id}` }

@@ -2,10 +2,13 @@ import { config } from './config'
 import { localEmbedder, warmup } from './embed'
 import { MemoryStore } from './memory'
 import { localReranker, warmupReranker } from './rerank'
+import { PrototypeGovernor } from './governor'
 import { createApp } from './server'
 import { MIN_PASSWORD, USERNAME } from './users'
 
-const store = await MemoryStore.open(localEmbedder, { reranker: config.rerank.enabled ? localReranker : null })
+// ตอนบันทึกติดป้ายหมวดด้วยแบบ proto เสมอ (ไม่เพิ่มเวลา) · LLM ใช้กับงานติดป้ายย้อนหลัง bun run govern
+const labeler = config.governor.mode === 'off' ? null : new PrototypeGovernor(localEmbedder)
+const store = await MemoryStore.open(localEmbedder, { reranker: config.rerank.enabled ? localReranker : null, labeler })
 
 // admin คนแรกจาก env (เช่นค่าจาก SSM บนคลาวด์) · สร้างเฉพาะเมื่อยังไม่มีผู้ใช้ จึงตั้งค่าค้างไว้ได้โดยไม่ทับรหัสที่เปลี่ยนแล้ว
 const boot = config.bootstrapAdmin
@@ -29,4 +32,4 @@ const app = createApp(store, undefined, { warmPoints: true, exitOnLostDb: true }
 
 // idleTimeout: Bun's 10 s default cuts off /v1/export of large brains (claude-skills ~36k memories)
 Bun.serve({ port: config.port, hostname: process.env.PANYA_HOST ?? '127.0.0.1', idleTimeout: 255, fetch: app.fetch })
-console.log(`[panya] listening on :${config.port} · seekdb ${config.seekdb.host}:${config.seekdb.port}/${config.seekdb.database} · ${config.embed.model}${config.rerank.enabled ? ` · rerank ${config.rerank.model} (top ${config.rerank.top})` : ''} · ${store.users.loginRequired ? 'login required' : 'API key only'}`)
+console.log(`[panya] listening on :${config.port} · seekdb ${config.seekdb.host}:${config.seekdb.port}/${config.seekdb.database} · ${config.embed.model}${config.rerank.enabled ? ` · rerank ${config.rerank.model} (top ${config.rerank.top})` : ''} · governor ${config.governor.mode} · ${store.users.loginRequired ? 'login required' : 'API key only'}`)

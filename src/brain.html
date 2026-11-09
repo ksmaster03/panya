@@ -34,12 +34,13 @@
   .nav a[aria-current="page"] { background: rgba(57, 135, 229, .45); font-weight: 600; }
   .nav a:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; }
   form { display: flex; gap: 8px; flex: 1 1 320px; min-width: 0; }
-  input, button {
+  input, button, select {
     font: inherit; color: var(--ink); background: var(--field); border: 1px solid var(--line); border-radius: var(--r);
     padding: 8px 14px; min-width: 0; min-height: var(--tap);
   }
   input::placeholder { color: #7f93b6; }
-  input:focus, button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 1px; }
+  select { cursor: pointer; flex: 0 1 184px; width: 184px; text-overflow: ellipsis; }
+  input:focus, select:focus-visible, button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 1px; }
   #q { flex: 1 1 auto; }
   button { cursor: pointer; background: rgba(28, 74, 140, .55); white-space: nowrap; transition: background .15s, box-shadow .15s; }
   button:hover { background: rgba(40, 104, 190, .7); box-shadow: 0 0 16px rgba(106, 169, 255, .35); }
@@ -68,7 +69,7 @@
   #tip small { color: var(--muted); display: block; margin-top: 4px; }
   #hud .grow { flex: 1 1 auto; }
   /* มือถือ: แถวแรกเป็นชื่อ แถบนำทาง และปุ่มภาษา แถวที่สองเป็นช่องค้นเต็มความกว้าง */
-  @media (max-width: 820px) { h1 span { display: none; } header { gap: 8px; padding: 8px 12px; } #search { order: 9; flex-basis: 100%; } #lang { margin-left: auto; } }
+  @media (max-width: 820px) { h1 span { display: none; } header { gap: 8px; padding: 8px 12px; min-width: 0; } #search { order: 9; flex-basis: 100%; } #lang { margin-left: auto; } #pf { flex-basis: 104px; width: 104px; padding: 8px; } }
   #hud { position: absolute; left: 14px; right: 14px; bottom: 12px; display: flex; gap: 10px; align-items: center; font-size: 12px; color: var(--muted); pointer-events: none; }
   #hud button { pointer-events: auto; font-size: 12px; padding: 4px 12px; min-height: var(--tap); }
   #gate { position: absolute; inset: 0; display: grid; place-items: center; background: radial-gradient(closest-side, rgba(3, 8, 20, .35), rgba(3, 8, 20, .78)); padding: 16px; }
@@ -94,6 +95,9 @@
   <nav class="nav" data-i18n-aria="navAria"><a href="/brain" aria-current="page" data-i18n="navBrain"></a><a href="/dashboard" data-i18n="dashboard"></a><a href="/warehouse" data-i18n="navWh"></a></nav>
   <form id="search">
     <input id="q" data-i18n-ph="qPh" data-i18n-aria="qAria" autocomplete="off">
+    <select id="pf" data-i18n-aria="pfAria">
+      <option value="" data-i18n="pAll"></option><option value="suta" data-i18n="pSuta"></option><option value="cinta" data-i18n="pCinta"></option><option value="bhavana" data-i18n="pBhavana"></option>
+    </select>
     <button class="primary" id="go" data-i18n="go"></button>
   </form>
   <button id="lang" type="button"></button>
@@ -146,6 +150,8 @@ const L = {
     intro: 'พิมพ์คำถามด้านบน จุดที่เกี่ยวข้องจะสว่างขึ้นบนสมอง ชี้ที่จุดใดก็ได้เพื่ออ่านความจำนั้น', typeAbove: 'พิมพ์คำถามด้านบน',
     whyUnknown: 'ไม่ตอบ: คำถามนี้ถามถึงรายที่ไม่เคยปรากฏในความจำ', whyNoMatch: 'ไม่มีความจำที่เกี่ยวข้องพอ สมองเลือกตอบว่าไม่รู้',
     emptyBrain: 'สมองนี้ยังไม่มีความจำ เก็บความจำแรกด้วย POST /v1/memories แล้วโหลดหน้านี้ใหม่',
+    pfAria: 'กรองตามหมวดปัญญา', pAll: 'ทุกหมวด', pSuta: 'สุตมย · ฟัง/อ่าน', pCinta: 'จินตมย · คิด', pBhavana: 'ภาวนามย · ลงมือ',
+    suta: 'สุตมยปัญญา', cinta: 'จินตมยปัญญา', bhavana: 'ภาวนามยปัญญา',
     stats: (n, e, b) => `${n} ความจำ · ${e} เส้นเชื่อม · ${b}`, badKey: 'API key ไม่ถูกต้อง', wrongBrain: 'key นี้ใช้กับสมองนี้ไม่ได้', serverSays: (n) => `เซิร์ฟเวอร์ตอบ ${n}`, raw: (m) => m,
   },
   en: {
@@ -158,6 +164,8 @@ const L = {
     intro: 'Type a question above. Matching points light up on the brain. Point at any dot to read that memory.', typeAbove: 'Type a question above',
     whyUnknown: 'No answer: the question names something that never appears in this brain', whyNoMatch: 'No memory was relevant enough, so the brain chose to say it does not know',
     emptyBrain: 'This brain has no memories yet. Store the first one with POST /v1/memories, then reload this page.',
+    pfAria: 'Filter by kind of wisdom', pAll: 'All wisdom', pSuta: 'Suta · heard/read', pCinta: 'Cinta · reasoned', pBhavana: 'Bhavana · practised',
+    suta: 'Suta (learned)', cinta: 'Cinta (reasoned)', bhavana: 'Bhavana (practised)',
     stats: (n, e, b) => `${n} memories · ${e} links · ${b}`, badKey: 'That API key is not valid', wrongBrain: 'This key does not work for this brain', serverSays: (n) => `Server responded ${n}`, raw: (m) => m,
   },
 }
@@ -441,7 +449,7 @@ function pick(ev) {
 }
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
 const when = (ms) => new Date(ms).toLocaleDateString(loc(), { day: 'numeric', month: 'short', year: '2-digit' })
-const meta = (n) => `${esc(n.group)} · ${when(n.createdAt)}${n.source ? ' · ' + esc(n.source) : ''}`
+const meta = (n) => `${n.panya ? t(n.panya) + ' · ' : ''}${esc(n.group)} · ${when(n.createdAt)}${n.source ? ' · ' + esc(n.source) : ''}`
 
 function showTip(ev) {
   const tip = $('tip')
@@ -538,7 +546,7 @@ $('search').addEventListener('submit', async (ev) => {
   lit = new Map(); litIdx = []; pinned = -1
   if (!q) return showList(['results'], [], ['typeAbove'])
   try {
-    const r = await busy($('go'), t('searching'), () => api('/v1/search', { brain: cfg.container, q, limit: 8 }))
+    const r = await busy($('go'), t('searching'), () => api('/v1/search', { brain: cfg.container, q, limit: 8, ...($('pf').value ? { panya: $('pf').value } : {}) }))
     const byId = new Map(nodes.map((n, i) => [n.id, i]))
     const items = r.hits.map((h) => ({ idx: byId.get(h.id), score: h.score })).filter((x) => x.idx !== undefined)
     for (const it of items) lit.set(it.idx, it.score)

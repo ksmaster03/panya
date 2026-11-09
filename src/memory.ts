@@ -2,6 +2,7 @@ import { SeekdbClient, Schema, FulltextIndexConfig, VectorIndexConfig, type Coll
 import { config, type SearchTuning } from './config'
 import type { Embedder } from './embed'
 import type { Reranker } from './rerank'
+import type { Governor, Panya } from './governor'
 import { EntityRegistry, norm } from './entities'
 import { UserRegistry } from './users'
 import { BrainRegistry } from './brains'
@@ -22,8 +23,16 @@ export interface RememberInput {
   source?: string
   /** รหัสอ้างอิงของผู้เรียกเอง เช่น id ของแถวในระบบต้นทาง คืนกลับมาพร้อมผลค้น */
   ref?: string
+  /** หมวดปัญญา 3 (suta/cinta/bhavana) ไม่ใส่ = ให้ผู้คุมสมองติดป้ายให้ */
+  panya?: Panya
+  /** ใช้ตอนนำเข้า: คงที่มาและความมั่นใจของป้ายเดิมไว้ (ไม่ใส่ = ผู้ส่งระบุเอง) */
+  panyaBy?: Exclude<PanyaBy, ''>
+  panyaConf?: number
   now?: number
 }
+
+/** ที่มาของป้ายหมวด: user = ผู้ส่งระบุเอง · proto/llm = ผู้คุมสมองติดให้ · '' = ยังไม่มีป้าย */
+export type PanyaBy = 'user' | 'proto' | 'llm' | ''
 
 export interface Memory {
   id: string
@@ -42,6 +51,11 @@ export interface Memory {
   count: number
   source: string
   ref: string
+  /** หมวดปัญญา 3 · '' = ยังไม่มีป้าย (ความจำที่บันทึกก่อนมีหมวด) */
+  panya: Panya | ''
+  panyaBy: PanyaBy
+  /** 0-1 ความมั่นใจของป้าย (ผู้ส่งระบุเอง = 1) */
+  panyaConf: number
 }
 
 export interface SearchHit extends Memory {
@@ -71,6 +85,8 @@ export interface GraphNode {
   id: string
   text: string
   kind: Kind
+  /** หมวดปัญญา 3 · '' = ยังไม่มีป้าย */
+  panya: Panya | ''
   subject: string
   source: string
   createdAt: number
@@ -95,6 +111,8 @@ export interface BrainStats {
   /** ยังใช้ได้ แต่จะหมดอายุภายใน 7 วัน */
   expiringSoon: number
   kinds: Record<Kind, number>
+  /** จำนวนตามหมวดปัญญา 3 · none = ยังไม่มีป้าย */
+  panya: Record<Panya | 'none', number>
   /** มี subject + attribute */
   keyed: number
   sources: number
@@ -132,6 +150,9 @@ function toMemory(id: string, m: Meta): Memory {
     count: Number(m.count ?? 1),
     source: String(m.source ?? ''),
     ref: String(m.ref ?? ''),
+    panya: (String(m.panya ?? '') as Panya | ''),
+    panyaBy: (String(m.panyaBy ?? '') as PanyaBy),
+    panyaConf: Number(m.panyaConf ?? 0),
   }
 }
 
@@ -160,6 +181,8 @@ export class MemoryStore {
     private reranker: Reranker | null,
     readonly users: UserRegistry,
     readonly brains: BrainRegistry,
+    /** ผู้คุมสมองที่ติดป้ายหมวดตอนบันทึก (ต้องเร็ว ใช้แบบ proto) · null = ไม่ติดป้าย */
+    private labeler: Governor | null = null,
   ) {}
 
   private next = 0
@@ -172,7 +195,7 @@ export class MemoryStore {
 
   static async open(
     embedder: Embedder,
-    opts: Partial<typeof config.seekdb> & { connectTimeoutMs?: number; reranker?: Reranker | null } = {},
+    opts: Partial<typeof config.seekdb> & { connectTimeoutMs?: number; reranker?: Reranker | null; labeler?: Governor | null } = {},
   ): Promise<MemoryStore> {
     const c = { ...config.seekdb, ...opts }
     // seekdb ใช้เวลาบูตราวครึ่งนาที ถ้าเปิดพร้อมกันด้วย compose ต้องรอ ไม่ใช่ล้ม
@@ -208,7 +231,7 @@ export class MemoryStore {
       const rc = new SeekdbClient({ host: c.host, port: c.port, user: c.user, password: c.password, database: c.database })
       readers.push({ client: rc, col: await rc.getCollection({ name: c.collection, embeddingFunction: null }) })
     }
-    return new MemoryStore(client, col, embedder, await EntityRegistry.open(client), readers, opts.reranker ?? null, await UserRegistry.open(client), await BrainRegistry.open(client))
+    return new MemoryStore(client, col, embedder, await EntityRegistry.open(client), readers, opts.reranker ?? null, await UserRegistry.open(client), await BrainRegistry.open(client), opts.labeler ?? null)
   }
 
   async close() {
@@ -241,12 +264,23 @@ export class MemoryStore {
     for (let i = 0; i < inputs.length; i += 32) {
       vectors.push(...(await this.embedder.passage(inputs.slice(i, i + 32).map((x) => x.text.trim()))))
     }
+    const labels = await this.label(inputs, vectors)
     const out: RememberResult[] = []
-    for (let i = 0; i < inputs.length; i++) out.push(await this.remember(inputs[i]!, vectors[i]))
+    for (let i = 0; i < inputs.length; i++) out.push(await this.remember(inputs[i]!, vectors[i], labels[i]))
     return out
   }
 
-  async remember(input: RememberInput, precomputed?: number[]): Promise<RememberResult> {
+  /** ป้ายหมวดของแต่ละรายการ: ผู้ส่งระบุเองใช้ตามนั้น ไม่ระบุให้ผู้คุมสมองติดจากเวกเตอร์ที่คำนวณแล้ว */
+  private async label(inputs: RememberInput[], vectors: number[][]): Promise<Meta[]> {
+    const out: Meta[] = inputs.map((i) => (i.panya ? { panya: i.panya, panyaBy: i.panyaBy ?? 'user', panyaConf: i.panyaConf ?? 1 } : { panya: '', panyaBy: '', panyaConf: 0 }))
+    const todo = inputs.map((x, i) => i).filter((i) => !inputs[i]!.panya)
+    if (!this.labeler || !todo.length) return out
+    const v = await this.labeler.classify(todo.map((i) => inputs[i]!.text.trim()), todo.map((i) => vectors[i]!))
+    todo.forEach((i, k) => { out[i] = { panya: v[k]!.panya, panyaBy: v[k]!.by, panyaConf: v[k]!.confidence } })
+    return out
+  }
+
+  async remember(input: RememberInput, precomputed?: number[], labeled?: Meta): Promise<RememberResult> {
     const text = input.text.trim()
     if (!text) throw new Error('text is empty')
     if (!input.container) throw new Error('container is required')
@@ -254,6 +288,7 @@ export class MemoryStore {
     const subject = input.subject?.trim() ?? ''
     const attribute = input.attribute?.trim() ?? ''
     const embedding: number[][] = [precomputed ?? (await this.embedder.passage([text]))[0]!]
+    const panya = labeled ?? (await this.label([{ ...input, text }], embedding))[0]!
     const id = crypto.randomUUID()
     let action: 'created' | 'superseded' | 'merged' = 'created'
 
@@ -281,7 +316,9 @@ export class MemoryStore {
       const dist = near.distances?.[0]?.[0]
       const nm = near.metadatas?.[0]?.[0] as Meta | undefined
       if (nid && nm && dist != null && 1 - dist >= config.search.dedupeSim && !nm.subject) {
-        const merged = { ...nm, count: Number(nm.count ?? 1) + 1, lastSeenAt: now }
+        // ข้อความซ้ำที่ผู้ส่งระบุหมวดมา: ป้ายของผู้ใช้ชนะป้ายที่ระบบเดาไว้
+        const relabel: Meta = input.panya && nm.panyaBy !== 'user' ? { panya: input.panya, panyaBy: 'user', panyaConf: 1 } : {}
+        const merged = { ...nm, ...relabel, count: Number(nm.count ?? 1) + 1, lastSeenAt: now }
         await this.col.update({ ids: nid, metadatas: merged })
         return { memory: toMemory(nid, merged), action: 'merged' }
       }
@@ -302,6 +339,7 @@ export class MemoryStore {
       source: input.source ?? '',
       ref: input.ref ?? '',
       codes: extractCodes(text).join(' '),
+      ...panya,
     }
     await this.col.add({ ids: id, documents: tokenize(text).join(' '), embeddings: embedding!, metadatas: meta })
     // subject แบบ "carrier:สยามโลจิสติกส์" ลงทะเบียนชื่อให้เอง (ข้ามถ้าเป็นรหัส เพราะรหัสมีกฎของมันอยู่แล้ว)
@@ -323,14 +361,19 @@ export class MemoryStore {
       includeSuperseded?: boolean
       /** แนบคะแนนแยกส่วนของแต่ละผล */
       explain?: boolean
+      /** ค้นเฉพาะหมวดปัญญาเหล่านี้ */
+      panya?: Panya[]
     } = {},
   ): Promise<SearchResult> {
     const t = { ...config.search, ...opts.tuning }
     const now = opts.asOf ?? opts.now ?? Date.now()
     const limit = opts.limit ?? 5
-    const where: Where = opts.asOf !== undefined
+    const base: Where = opts.asOf !== undefined
       ? this.asOfWhere(container, opts.asOf)
       : opts.includeSuperseded ? { $and: [{ container }, { validUntil: { $gt: now } }] } : this.liveWhere(container, now)
+    const where: Where = opts.panya?.length
+      ? ({ $and: [base, opts.panya.length === 1 ? { panya: opts.panya[0]! } : { panya: { $in: opts.panya } }] } as Where)
+      : base
     const qTokens = tokenize(q)
 
     // ชื่อเฉพาะ: หาว่าคำค้นพูดถึงรายที่รู้จัก หรือรายที่ไม่เคยเห็น
@@ -503,7 +546,7 @@ export class MemoryStore {
     const dim = vecs[0]?.length ?? 0
     const nodes: GraphNode[] = r.ids.map((id, i) => {
       const m = toMemory(id, r.metadatas?.[i] as Meta)
-      return { id, text: m.text, kind: m.kind, subject: m.subject, source: m.source, createdAt: m.createdAt, count: m.count, x: 0, y: 0 }
+      return { id, text: m.text, kind: m.kind, panya: m.panya, subject: m.subject, source: m.source, createdAt: m.createdAt, count: m.count, x: 0, y: 0 }
     })
     if (n < 2 || !dim) return { nodes, edges: [] }
 
@@ -671,6 +714,16 @@ export class MemoryStore {
     return r.ids.map((id, i) => toMemory(id, r.metadatas?.[i] as Meta)).sort((a, b) => b.createdAt - a.createdAt)
   }
 
+  /** ตั้งป้ายหมวดของความจำหนึ่งรายการ คืน null ถ้าไม่พบใน container นี้ */
+  async setPanya(container: string, id: string, panya: Panya | '', by: PanyaBy, confidence: number): Promise<Memory | null> {
+    const r = await this.col.get({ ids: id, include: ['metadatas'] })
+    const m = r.metadatas?.[0] as Meta | undefined
+    if (!r.ids.length || !m || m.container !== container) return null
+    const next = { ...m, panya, panyaBy: panya ? by : '', panyaConf: panya ? Math.round(confidence * 100) / 100 : 0 }
+    await this.col.update({ ids: id, metadatas: next })
+    return toMemory(id, next)
+  }
+
   async forget(container: string, id: string): Promise<boolean> {
     const r = await this.col.get({ ids: id, include: ['metadatas'] })
     const m = r.metadatas?.[0] as Meta | undefined
@@ -719,7 +772,7 @@ export class MemoryStore {
         let e = by.get(m.container)
         if (!e) {
           const s: BrainStats = {
-            brain: m.container, live: 0, superseded: 0, expired: 0, expiringSoon: 0, kinds: { fact: 0, preference: 0, event: 0 },
+            brain: m.container, live: 0, superseded: 0, expired: 0, expiringSoon: 0, kinds: { fact: 0, preference: 0, event: 0 }, panya: { suta: 0, cinta: 0, bhavana: 0, none: 0 },
             keyed: 0, sources: 0, merges: 0, chars: 0, firstAt: m.createdAt, lastAt: m.createdAt,
             minute: new Array(60).fill(0), hour: new Array(24).fill(0), day: new Array(30).fill(0),
           }
@@ -735,6 +788,7 @@ export class MemoryStore {
         s.live++
         if (m.validUntil && m.validUntil - now < 7 * 86_400_000) s.expiringSoon++
         if (m.kind in s.kinds) s.kinds[m.kind]++
+        s.panya[m.panya || 'none']++
         if (m.subject && m.attribute) s.keyed++
         if (m.source) e.sources.add(m.source)
         s.merges += Math.max(0, m.count - 1)
