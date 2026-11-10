@@ -164,5 +164,5 @@ describe('POST /v1/files', () => {
     expect(t.document).toContain('pdf')
     expect(typeof t.media.enabled).toBe('boolean')
     expect(typeof t.image.enabled).toBe('boolean')
-  })
+  }, 30_000) // ลองเรียก python/tesseract: ช้าเมื่อเครื่องทำงานหนัก
 })

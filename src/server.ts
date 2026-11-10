@@ -170,6 +170,30 @@ export function createApp(
     return c.json({ username: user.username, role: user.role, brains: user.brains, expiresAt: s.expiresAt })
   })
 
+  // ตั้งค่าครั้งแรกของแอปในเครื่อง (PANYA_SETUP=local): ยังไม่มีผู้ใช้เลย ให้สร้าง admin คนแรกจากหน้า /login
+  // รับเฉพาะคำขอจากเครื่องนี้เอง (loopback ของการเชื่อมต่อจริง ไม่ดู header) และปิดตัวเองเมื่อมีผู้ใช้แล้ว
+  const setupOpen = async (c: Context<Env>) => {
+    if (!config.setup.local) return false
+    let ip = ''
+    try { ip = getConnInfo(c).remote.address ?? '' } catch {}
+    return /^(127\.|::1$|::ffff:127\.)/.test(ip) && (await users.count()) === 0
+  }
+  app.get('/auth/setup', async (c) => c.json({ needed: await setupOpen(c) }))
+  app.post('/auth/setup', async (c) => {
+    if (!sameOrigin(c)) return c.json({ error: 'cross-site request' }, 403)
+    if (!(await setupOpen(c))) return c.json({ error: 'setup is closed' }, 403)
+    const b = await c.req.json().catch(() => null)
+    const username = typeof b?.username === 'string' ? b.username.trim().toLowerCase() : ''
+    const password = typeof b?.password === 'string' ? b.password : ''
+    if (!USERNAME.test(username)) return c.json({ error: 'username must be 2-64 characters: a-z 0-9 . _ -' }, 400)
+    if (password.length < MIN_PASSWORD || password.length > 256) return c.json({ error: `password must be ${MIN_PASSWORD}-256 characters` }, 400)
+    const user = await users.create(username, password, 'admin', ['*'])
+    const s = await users.startSession(user, clientIp(c))
+    setCookie(c, SESSION_COOKIE, s.token, { httpOnly: true, secure: secureCookie(c), sameSite: 'Lax', path: '/', expires: new Date(s.expiresAt) })
+    console.log(`[panya] first admin "${username}" created from the setup page`)
+    return c.json({ username: user.username, role: user.role, brains: user.brains, expiresAt: s.expiresAt }, 201)
+  })
+
   app.post('/auth/logout', async (c) => {
     const sid = getCookie(c, SESSION_COOKIE)
     if (sid) await users.endSession(sid)

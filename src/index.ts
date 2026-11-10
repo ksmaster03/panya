@@ -21,7 +21,7 @@ if (boot.username && (await store.users.count()) === 0) {
   console.log(`[panya] created the first admin user "${boot.username}"`)
 }
 
-if (config.apiKeys.length === 0 && (await store.users.count()) === 0) {
+if (config.apiKeys.length === 0 && (await store.users.count()) === 0 && !config.setup.local) {
   console.error('[panya] no PANYA_API_KEYS and no users: refusing to start without auth (set PANYA_ADMIN_USER + PANYA_ADMIN_PASSWORD or PANYA_API_KEYS)')
   process.exit(1)
 }
@@ -32,4 +32,4 @@ const app = createApp(store, undefined, { warmPoints: true, exitOnLostDb: true }
 
 // idleTimeout: Bun's 10 s default cuts off /v1/export of large brains (claude-skills ~36k memories)
 Bun.serve({ port: config.port, hostname: process.env.PANYA_HOST ?? '127.0.0.1', idleTimeout: 255, maxRequestBodySize: (config.files.maxMb + 1) * 1024 * 1024, fetch: app.fetch })
-console.log(`[panya] listening on :${config.port} · seekdb ${config.seekdb.host}:${config.seekdb.port}/${config.seekdb.database} · ${config.embed.model}${config.rerank.enabled ? ` · rerank ${config.rerank.model} (top ${config.rerank.top})` : ''} · governor ${config.governor.mode} · ${store.users.loginRequired ? 'login required' : 'API key only'}`)
+console.log(`[panya] listening on :${config.port} · ${config.store.kind === 'sqlite' ? `sqlite ${config.store.dataDir}` : `seekdb ${config.seekdb.host}:${config.seekdb.port}/${config.seekdb.database}`} · ${config.embed.model}${config.rerank.enabled ? ` · rerank ${config.rerank.model} (top ${config.rerank.top})` : ''} · governor ${config.governor.mode} · ${store.users.loginRequired ? 'login required' : config.setup.local ? 'first-run setup at /login' : 'API key only'}`)

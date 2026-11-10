@@ -53,6 +53,29 @@ bun run bench       # speed
 
 `--haystack <brain>[:<count>]` mixes real memories from one of your brains into the eval as distractors. They are read from the database at run time and removed afterwards; they are never written to a file.
 
+## Windows app (no Docker)
+
+`windows/` builds a per-user Windows installer that needs neither Docker nor admin rights:
+
+```bash
+bun windows/build.ts        # Windows x64 only → dist/windows/Panya-Setup.exe
+```
+
+The build copies `src/`, installs production dependencies, keeps only the Windows x64 native files, bundles the `multilingual-e5-small` model (so the first start does not download anything) and compiles two programs with `bun build --compile`. `Panya.exe` is the launcher and also the runtime: it starts the server by running itself as Bun (`BUN_BE_BUN=1`), so the package does not carry a second `bun.exe`.
+
+What the installer does:
+
+- Unpacks to `%LOCALAPPDATA%\Programs\Panya` with the `tar.exe` that ships with Windows 10 and 11, adds Start menu and desktop shortcuts (Panya, Stop Panya, Panya settings, Uninstall Panya) and an entry in Settings > Apps. It asks whether to start Panya when you sign in. Flags: `--yes`, `--no-autostart`, `--no-launch`.
+- Stores memories in SQLite (`PANYA_STORE=sqlite`) under `%LOCALAPPDATA%\Panya\data`, separate from the program, so installing a newer version over an old one keeps them. Settings are in `%LOCALAPPDATA%\Panya\panya.env` (port, and `PANYA_HOST=0.0.0.0` to allow other machines on the LAN), the log is in `logs\panya.log`.
+- The first time, the sign-in page becomes a setup page that creates the administrator (`PANYA_SETUP=local`). It accepts requests only from the same computer, judged by the real connection address, and closes once any user exists.
+- Uninstall from Settings > Apps or the Start menu. Memories are kept unless you run `Panya.exe --uninstall --purge`.
+
+Measured on this machine (Windows 11, no GPU): the installer is 271 MB, installs in 12 s, the server is ready about 3.5 s after launch and uses about 750 MB of RAM. The whole test suite passes against the SQLite store too (`PANYA_STORE=sqlite PANYA_DATA_DIR=<temp folder> bun test`). With 30,000 synthetic memories in one brain, a vector search takes about 40 ms once the vectors are in memory (about 0.4 s for the first search after start-up) and a word search 0.2 to 0.3 s.
+
+The SQLite store (`src/sqlite.ts`) implements only the parts of the seekdb collection API that panya uses. Vectors are compared one by one in memory instead of through an HNSW index, and words are matched through a table of the already tokenized words, scored with BM25. That is fine for tens of thousands of memories per brain; for a shared server with many large brains, use seekdb. To move memories from a Docker install, use `GET /v1/export` there and `POST /v1/import` in the app.
+
+Not done yet: the installer and `Panya.exe` are not code-signed, so Windows SmartScreen shows "Windows protected your PC" (More info > Run anyway). Audio and video transcription still needs Python with `faster-whisper`, and image OCR needs Tesseract, on that computer. seekdb's own embedded mode lists Windows, but on this machine it hung at start-up under both Bun and Node, which is why the app uses SQLite.
+
 ## Start automatically on Windows
 
 `scripts/start-panya.ps1` starts Docker Desktop if it is not running, brings up the seekdb container, waits for it, then keeps `bun src/index.ts` running: after a crash it restarts 15 s later. Output goes to `logs/panya.log`.

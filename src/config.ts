@@ -4,6 +4,14 @@ export const config = {
   port: num(process.env.PANYA_PORT, 6800),
   // รูปแบบ: "key" (ใช้ได้ทุก container) หรือ "key@container" (ผูกกับ container เดียว) คั่นด้วย ,
   apiKeys: (process.env.PANYA_API_KEYS ?? '').split(',').map((s) => s.trim()).filter(Boolean),
+  // ที่เก็บความจำ: seekdb = เซิร์ฟเวอร์ seekdb (Docker/คลาวด์ ค่าตั้งต้น) · sqlite = ไฟล์ในเครื่อง ไม่ต้องมี Docker (แอป Windows)
+  store: {
+    kind: (process.env.PANYA_STORE === 'sqlite' ? 'sqlite' : 'seekdb') as 'seekdb' | 'sqlite',
+    // โฟลเดอร์ของไฟล์ฐานข้อมูลแบบ sqlite (หนึ่งไฟล์ต่อ database)
+    dataDir: process.env.PANYA_DATA_DIR ?? './data',
+  },
+  // local = เริ่มได้แม้ยังไม่มีผู้ใช้ แล้วสร้าง admin คนแรกจากหน้า /login บนเครื่องนี้ (แอป Windows)
+  setup: { local: process.env.PANYA_SETUP === 'local' },
   seekdb: {
     host: process.env.SEEKDB_HOST ?? '127.0.0.1',
     port: num(process.env.SEEKDB_PORT, 2881),

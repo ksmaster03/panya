@@ -27,7 +27,8 @@
     "import:claude-memory": "bun scripts/import-claude-memory.ts",
     "govern": "bun scripts/govern.ts",
     "eval:govern": "bun eval/govern.ts",
-    "eval:chunks": "bun eval/chunks.ts"
+    "eval:chunks": "bun eval/chunks.ts",
+    "build:windows": "bun windows/build.ts"
   },
   "license": "PolyForm-Noncommercial-1.0.0"
 }

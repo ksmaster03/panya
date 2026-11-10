@@ -7,6 +7,7 @@ import { EntityRegistry, norm } from './entities'
 import { UserRegistry } from './users'
 import { BrainRegistry } from './brains'
 import { coverage, extractCodes, tokenize } from './tokenize'
+import { SqliteClient } from './sqlite'
 
 export type Kind = 'fact' | 'preference' | 'event'
 
@@ -198,6 +199,12 @@ export class MemoryStore {
     opts: Partial<typeof config.seekdb> & { connectTimeoutMs?: number; reranker?: Reranker | null; labeler?: Governor | null } = {},
   ): Promise<MemoryStore> {
     const c = { ...config.seekdb, ...opts }
+    if (config.store.kind === 'sqlite') {
+      // แบบไฟล์ในเครื่อง: API ชุดเดียวกับ seekdb ส่วนที่ panya ใช้ (src/sqlite.ts)
+      const client = new SqliteClient(config.store.dataDir, c.database) as unknown as SeekdbClient
+      const col = (client as unknown as SqliteClient).collection(c.collection) as unknown as Collection
+      return new MemoryStore(client, col, embedder, await EntityRegistry.open(client), [], opts.reranker ?? null, await UserRegistry.open(client), await BrainRegistry.open(client), opts.labeler ?? null)
+    }
     // seekdb ใช้เวลาบูตราวครึ่งนาที ถ้าเปิดพร้อมกันด้วย compose ต้องรอ ไม่ใช่ล้ม
     const deadline = Date.now() + (opts.connectTimeoutMs ?? 120_000)
     for (;;) {

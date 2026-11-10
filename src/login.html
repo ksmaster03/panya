@@ -59,16 +59,28 @@ const L = {
   th: { title: 'panya · เข้าสู่ระบบ', headline: 'สมองที่สองของทีม', sub: 'เก็บความรู้ตามจริง ค้นเจอทั้งไทยและอังกฤษ และบอกตรง ๆ เมื่อไม่รู้',
         p1: 'เก็บข้อความตามจริง ไม่แต่งเติม', p2: 'สมองของแต่ละคน แชร์ให้อ่านได้', p3: 'ปฏิเสธรหัสผ่านและ key อัตโนมัติ',
         signIn: 'เข้าสู่ระบบ', signingIn: 'กำลังเข้าสู่ระบบ…', help: 'ใช้ชื่อผู้ใช้และรหัสผ่านที่ผู้ดูแลให้ไว้', user: 'ชื่อผู้ใช้', pass: 'รหัสผ่าน', show: 'แสดง', hide: 'ซ่อน',
-        forgot: 'ลืมรหัสผ่าน ติดต่อผู้ดูแลระบบเพื่อรีเซ็ต', empty: 'กรอกชื่อผู้ใช้และรหัสผ่าน', wrong: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง', locked: 'ลองผิดหลายครั้งเกินไป รอ 15 นาทีแล้วลองใหม่', down: 'ติดต่อเซิร์ฟเวอร์ไม่ได้ ลองใหม่อีกครั้ง' },
+        forgot: 'ลืมรหัสผ่าน ติดต่อผู้ดูแลระบบเพื่อรีเซ็ต', empty: 'กรอกชื่อผู้ใช้และรหัสผ่าน', wrong: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง', locked: 'ลองผิดหลายครั้งเกินไป รอ 15 นาทีแล้วลองใหม่', down: 'ติดต่อเซิร์ฟเวอร์ไม่ได้ ลองใหม่อีกครั้ง',
+        setup: 'ตั้งค่าครั้งแรก', setupHelp: 'สร้างบัญชีผู้ดูแลของเครื่องนี้ ตั้งชื่อผู้ใช้และรหัสผ่านอย่างน้อย 10 ตัวอักษร', setupGo: 'สร้างบัญชีและเข้าใช้', setupBusy: 'กำลังสร้างบัญชี…', setupNote: 'จดรหัสผ่านไว้ ใช้เข้าจากเครื่องอื่นหรือเมื่อออกจากระบบ', badUser: 'ชื่อผู้ใช้ใช้ได้เฉพาะ a-z 0-9 . _ - ยาว 2-64 ตัว', shortPass: 'รหัสผ่านต้องยาวอย่างน้อย 10 ตัวอักษร' },
   en: { title: 'panya · Sign in', headline: 'Your team’s second brain', sub: 'Keep knowledge word for word, find it in Thai or English, and get an honest “I don’t know” when it isn’t there.',
         p1: 'Stores text verbatim, never rewritten', p2: 'Personal brains you can share read-only', p3: 'Passwords and keys are refused automatically',
         signIn: 'Sign in', signingIn: 'Signing in…', help: 'Use the username and password your administrator gave you.', user: 'Username', pass: 'Password', show: 'Show', hide: 'Hide',
-        forgot: 'Forgot your password? Ask an administrator to reset it.', empty: 'Enter your username and password', wrong: 'Wrong username or password', locked: 'Too many attempts. Wait 15 minutes and try again.', down: 'Could not reach the server. Try again.' },
+        forgot: 'Forgot your password? Ask an administrator to reset it.', empty: 'Enter your username and password', wrong: 'Wrong username or password', locked: 'Too many attempts. Wait 15 minutes and try again.', down: 'Could not reach the server. Try again.',
+        setup: 'First-time setup', setupHelp: 'Create the administrator account for this computer. Choose a username and a password of at least 10 characters.', setupGo: 'Create account and start', setupBusy: 'Creating account…', setupNote: 'Write the password down. You need it to sign in from other devices or after signing out.', badUser: 'Usernames use a-z 0-9 . _ - and are 2-64 characters', shortPass: 'The password must be at least 10 characters' },
 }
 const t = (k) => UI.t(L, k)
 const $ = (id) => document.getElementById(id)
 UI.header('/login')
-const paint = () => { document.title = t('title'); UI.apply(L); $('show').textContent = t($('p').type === 'password' ? 'show' : 'hide'); $('err').textContent = '' }
+// แอปในเครื่องที่ยังไม่มีผู้ใช้: ฟอร์มเดียวกันใช้สร้างผู้ดูแลคนแรก
+let setup = false
+const paint = () => {
+  document.title = t('title'); UI.apply(L); $('show').textContent = t($('p').type === 'password' ? 'show' : 'hide'); $('err').textContent = ''
+  if (!setup) return
+  document.querySelector('form.card h2').textContent = t('setup')
+  document.querySelector('form.card .muted').textContent = t('setupHelp')
+  $('go').textContent = t('setupGo')
+  document.querySelector('form.card p.muted:last-child').textContent = t('setupNote')
+}
+fetch('/auth/setup').then((r) => r.json()).then((j) => { if (j.needed) { setup = true; $('p').autocomplete = 'new-password'; paint() } }).catch(() => {})
 document.addEventListener('panya:lang', paint)
 paint()
 $('show').addEventListener('click', () => { const on = $('p').type === 'password'; $('p').type = on ? 'text' : 'password'; $('show').setAttribute('aria-pressed', String(on)); $('show').textContent = t(on ? 'hide' : 'show') })
@@ -80,14 +92,16 @@ $('f').addEventListener('submit', async (ev) => {
   ev.preventDefault()
   const username = $('u').value.trim(), password = $('p').value
   if (!username || !password) { $('err').textContent = t('empty'); return }
-  $('go').disabled = true; $('go').textContent = t('signingIn'); $('err').textContent = ''
+  if (setup && !/^[a-z0-9][a-z0-9._-]{1,63}$/.test(username.toLowerCase())) { $('err').textContent = t('badUser'); return }
+  if (setup && password.length < 10) { $('err').textContent = t('shortPass'); return }
+  $('go').disabled = true; $('go').textContent = t(setup ? 'setupBusy' : 'signingIn'); $('err').textContent = ''
   try {
-    const r = await fetch('/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username, password }) })
+    const r = await fetch(setup ? '/auth/setup' : '/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username, password }) })
     if (r.ok) { location.replace(next); return }
     $('err').textContent = t(r.status === 429 ? 'locked' : r.status === 401 ? 'wrong' : 'down')
     $('p').value = ''; $('p').focus()
   } catch { $('err').textContent = t('down') }
-  $('go').disabled = false; $('go').textContent = t('signIn')
+  $('go').disabled = false; $('go').textContent = t(setup ? 'setupGo' : 'signIn')
 })
 </script>
 </body>
