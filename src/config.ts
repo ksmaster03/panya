@@ -10,6 +10,15 @@ export const config = {
     // โฟลเดอร์ของไฟล์ฐานข้อมูลแบบ sqlite (หนึ่งไฟล์ต่อ database)
     dataDir: process.env.PANYA_DATA_DIR ?? './data',
   },
+  // ซิงก์ทางเดียวไปเซิร์ฟเวอร์ panya อีกตัว (src/sync.ts): ต้องตั้งครบทั้ง url, key (เขียน brain ปลายทางได้) และ brains
+  sync: {
+    url: process.env.PANYA_SYNC_URL ?? '',
+    key: process.env.PANYA_SYNC_KEY ?? '',
+    brains: (process.env.PANYA_SYNC_BRAINS ?? '').split(',').map((s) => s.trim()).filter(Boolean),
+    intervalSec: Math.max(30, num(process.env.PANYA_SYNC_INTERVAL, 300)),
+    // ค่าตั้งต้นไม่ลบที่ปลายทางถ้าในเครื่องหายไปเกินครึ่งในรอบเดียว (กันฐานข้อมูลในเครื่องเสียแล้วลบคลาวด์ทิ้งหมด)
+    allowMassDelete: process.env.PANYA_SYNC_ALLOW_MASS_DELETE === '1',
+  },
   // local = เริ่มได้แม้ยังไม่มีผู้ใช้ แล้วสร้าง admin คนแรกจากหน้า /login บนเครื่องนี้ (แอป Windows)
   setup: { local: process.env.PANYA_SETUP === 'local' },
   seekdb: {

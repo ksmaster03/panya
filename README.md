@@ -76,6 +76,23 @@ The SQLite store (`src/sqlite.ts`) implements only the parts of the seekdb colle
 
 Not done yet: the installer and `Panya.exe` are not code-signed, so Windows SmartScreen shows "Windows protected your PC" (More info > Run anyway). Audio and video transcription still needs Python with `faster-whisper`, and image OCR needs Tesseract, on that computer. seekdb's own embedded mode lists Windows, but on this machine it hung at start-up under both Bun and Node, which is why the app uses SQLite.
 
+## Sync to another panya server
+
+A panya server can push chosen brains to another panya server, for example from the machine at home to the cloud. It is one way: the sender is the source of truth, and the receiver ends up with the same rows.
+
+```bash
+PANYA_SYNC_URL=https://panya.example.com   # the receiving server (needs this version too)
+PANYA_SYNC_KEY=...                          # a key on the receiver that can write those brains
+PANYA_SYNC_BRAINS=claude-memory,research    # only these brains
+PANYA_SYNC_INTERVAL=300                     # seconds between rounds (minimum 30)
+```
+
+Each round asks the receiver for a fingerprint of every row in the brain, compares it with its own, sends only the rows that are new or changed, and deletes the rows it no longer has. Rows keep their id and carry their embedding, so the receiver computes nothing and sending the same rows again creates no duplicates. Both servers must use the same embedding model; the receiver refuses otherwise.
+
+Two safety rules. If more than half of the receiver's rows would be deleted in one round (and more than 100), the deletes are skipped and logged, because that usually means the sender's database is broken, not that you deleted them; set `PANYA_SYNC_ALLOW_MASS_DELETE=1` if you meant it. The receiver runs the same secret check as a normal write and skips rows that fail it; the sender lists them as `refused` and does not send them again until they change.
+
+Measured with the real `claude-memory` brain (5,392 memories) into a server on the same machine: the first round took 9.9 s, a round with nothing to send 1.9 s. 68 old rows were refused because they look like keys or passwords under today's rules, so they stay only on the sender.
+
 ## Start automatically on Windows
 
 `scripts/start-panya.ps1` starts Docker Desktop if it is not running, brings up the seekdb container, waits for it, then keeps `bun src/index.ts` running: after a crash it restarts 15 s later. Output goes to `logs/panya.log`.
@@ -124,6 +141,9 @@ Every route under `/v1` needs `Authorization: Bearer <key>`.
 | `GET /v1/entities?brain=` | List registered names |
 | `GET /v1/export?brain=` | Everything in the brain as JSON (`&history=1` includes superseded versions) |
 | `POST /v1/import` | Load an export: `{ brain, memories, entities?, replace? }`, up to 5000 per request |
+| `GET /v1/sync/state?brain=` | Sync receiver: fingerprint of every row in the brain, plus the embedding model (write access to the brain) |
+| `POST /v1/sync/push` | Sync receiver: `{ brain, model, upsert?: [{ id, doc, meta, embedding }], delete?: [id], entities? }`, up to 500 rows; rows that look like secrets are skipped and listed in `refused` |
+| `GET /v1/sync/status` · `POST /v1/sync/run` | Sync sender: last results per brain, or sync now (admin or a key bound to no brain) |
 | `GET /v1/stats?brain=` | Number of live memories |
 | `DELETE /v1/memories/:id?brain=` | Delete one memory |
 | `DELETE /v1/sources?brain=&source=` | Delete everything that came from one source |

@@ -134,6 +134,15 @@ export type RememberResult ={ memory: Memory; action: 'created' | 'superseded' |
 type Meta = Record<string, string | number>
 const NEVER = 9_000_000_000_000_000
 
+/** ความจำหนึ่งแถวตามที่เก็บจริง ใช้คัดลอกระหว่างเซิร์ฟเวอร์ (src/sync.ts) */
+export interface RawMemory { id: string; doc: string; meta: Meta; embedding: number[] }
+
+/** ลายนิ้วมือของ metadata: เรียงคีย์ก่อน ทั้งสองฝั่งจึงได้ค่าเดียวกันไม่ว่าฐานข้อมูลจะคืนคีย์ลำดับไหน */
+export function metaHash(m: Meta): string {
+  const keys = Object.keys(m ?? {}).filter((k) => k !== 'container').sort()
+  return new Bun.CryptoHasher('sha1').update(JSON.stringify(keys.map((k) => [k, m[k]]))).digest('hex').slice(0, 16)
+}
+
 function toMemory(id: string, m: Meta): Memory {
   return {
     id,
@@ -809,6 +818,46 @@ export class MemoryStore {
   /** ลบความจำทั้งหมดที่มาจากแหล่งเดียวกัน (รวมรุ่นเก่า) ใช้ก่อนนำเข้าไฟล์เดิมซ้ำ */
   async forgetSource(container: string, source: string) {
     await this.col.delete({ where: { $and: [{ container }, { source }] } })
+  }
+
+  // ── ซิงก์ไปเซิร์ฟเวอร์อื่น (src/sync.ts) ─────────────────────────────
+  // คัดลอกความจำทั้งแถว (id เดิม, metadata, embedding) จึงไม่คำนวณ embedding ซ้ำที่ปลายทาง และส่งซ้ำได้ไม่เกิดรายการซ้ำ
+
+  /** id → ลายนิ้วมือของ metadata ทุกรุ่นใน brain: ใช้เทียบกับอีกฝั่งว่ารายการไหนต้องส่งหรือลบ */
+  async syncState(container: string): Promise<Record<string, string>> {
+    const out: Record<string, string> = {}
+    for (let offset = 0; ; offset += 1000) {
+      const r = await this.reader().get({ where: { container }, include: ['metadatas'], limit: 1000, offset })
+      r.ids.forEach((id, i) => { out[id] = metaHash(r.metadatas?.[i] as Meta) })
+      if (r.ids.length < 1000) break
+    }
+    return out
+  }
+
+  /** แถวดิบของความจำตาม id (เฉพาะที่อยู่ใน brain นี้) */
+  async rawByIds(container: string, ids: string[]): Promise<RawMemory[]> {
+    if (!ids.length) return []
+    const r = await this.reader().get({ ids, where: { container }, include: ['documents', 'metadatas', 'embeddings'] })
+    return r.ids.map((id, i) => ({ id, doc: r.documents?.[i] ?? '', meta: r.metadatas?.[i] as Meta, embedding: Array.from(r.embeddings?.[i] ?? []) }))
+  }
+
+  /** เขียนแถวดิบทับตาม id (ลบแล้วเพิ่ม) · ลงทะเบียนชื่อจาก subject แบบเดียวกับ remember() */
+  async putRaw(container: string, rows: RawMemory[]) {
+    if (!rows.length) return
+    await this.deleteIds(container, rows.map((x) => x.id))
+    const metas: Meta[] = rows.map((x) => ({ ...x.meta, container }))
+    await this.col.add({ ids: rows.map((x) => x.id), documents: rows.map((x) => x.doc), embeddings: rows.map((x) => x.embedding), metadatas: metas })
+    for (const m of metas) {
+      const subject = String(m.subject ?? ''), colon = subject.indexOf(':')
+      if (colon > 0 && !extractCodes(subject.slice(colon + 1)).length) await this.entities.addName(container, subject.slice(0, colon), subject.slice(colon + 1))
+    }
+  }
+
+  /** ลบตาม id เฉพาะที่อยู่ใน brain นี้ (id ของ brain อื่นถูกข้าม) */
+  async deleteIds(container: string, ids: string[]) {
+    if (!ids.length) return
+    const r = await this.col.get({ ids, where: { container }, include: [] })
+    if (r.ids.length) await this.col.delete({ ids: [...r.ids] })
   }
 
   /** ลบทีละชุดตาม id: คำสั่งลบทั้ง brain ในครั้งเดียวหมดเวลาที่ฐานข้อมูลเมื่อมีหลายพันรายการ */

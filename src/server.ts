@@ -8,6 +8,7 @@ import { chunkDoc, type ChunkOptions } from './chunk'
 import { asrAvailable, extOf, extractDocument, kindOf, ocr, ocrAvailable, transcribe, type FileKind } from './extract'
 import { tmpdir } from 'node:os'
 import { unlink } from 'node:fs/promises'
+import { syncOnce, syncStatus } from './sync'
 import { MIN_PASSWORD, ROLES, USERNAME, randomPassword, type KeyLimits, type Role, type User } from './users'
 import { findSecret } from './secrets'
 import { mountMcp } from './mcp'
@@ -704,6 +705,67 @@ export function createApp(
     }
     emit({ type: 'in', brain, n: inputs.length, text: snip(inputs[0]!.text), group: groupOfInput(inputs[0]!), ...counts })
     return c.json({ brain, imported: inputs.length, ...counts }, 201)
+  })
+
+  // ── ซิงก์จากเซิร์ฟเวอร์อื่น (src/sync.ts) ───────────────────────────
+  // ฝั่งรับ: คัดลอกทั้งแถวด้วย id เดิมพร้อม embedding ที่คำนวณมาแล้ว ต้องใช้โมเดล embedding เดียวกัน
+  // ใช้สิทธิ์เขียน brain นั้น · ทุกแถวผ่านการตรวจความลับเหมือนการบันทึกปกติ ถ้ามีแถวใดมีความลับ จะไม่บันทึกอะไรเลย
+  const SYNC_ID = /^[\w-]{1,64}$/
+  const SYNC_KEY = /^\w{1,40}$/
+  const validRaw = (x: any): string | null => {
+    if (!x || typeof x !== 'object' || typeof x.id !== 'string' || !SYNC_ID.test(x.id)) return 'bad id'
+    if (typeof x.doc !== 'string' || x.doc.length > 100_000) return 'bad doc'
+    if (!Array.isArray(x.embedding) || x.embedding.length !== config.embed.dimension || !x.embedding.every((v: unknown) => typeof v === 'number' && Number.isFinite(v))) return `embedding must be ${config.embed.dimension} numbers`
+    const m = x.meta
+    if (!m || typeof m !== 'object' || Array.isArray(m)) return 'bad meta'
+    const entries = Object.entries(m)
+    if (entries.length > 40 || !entries.every(([k, v]) => SYNC_KEY.test(k) && ((typeof v === 'string' && v.length <= 100_000) || (typeof v === 'number' && Number.isFinite(v))))) return 'bad meta'
+    if (typeof m.text !== 'string' || !m.text.trim() || typeof m.createdAt !== 'number' || typeof m.validUntil !== 'number' || (m.active !== 0 && m.active !== 1)) return 'meta needs text, createdAt, validUntil, active'
+    return null
+  }
+  // กฎเดียวกับการบันทึกปกติ: ห้ามเก็บความลับ (ความจำเก่าในต้นทางอาจถูกเก็บก่อนมีกฎข้อใหม่)
+  const rawSecret = (m: any) => ['text', 'subject', 'attribute', 'source', 'ref'].some((f) => typeof m[f] === 'string' && findSecret(m[f]))
+
+  app.get('/v1/sync/state', async (c) => {
+    const brain = brainOf(c.get('wscope'), c.req.query('brain'))
+    if (!brain) return c.json(denied, 403)
+    return c.json({ brain, model: config.embed.model, dimension: config.embed.dimension, state: await store.syncState(brain) })
+  })
+
+  // ฝั่งส่ง: สถานะการซิงก์ของเซิร์ฟเวอร์นี้ และสั่งซิงก์ทันที · เฉพาะผู้ที่เข้าถึงได้ทุก brain (admin หรือ key ที่ไม่ผูก brain)
+  app.get('/v1/sync/status', (c) => {
+    if (c.get('wscope') !== null) return c.json(denied, 403)
+    return c.json(syncStatus)
+  })
+  app.post('/v1/sync/run', async (c) => {
+    if (c.get('wscope') !== null) return c.json(denied, 403)
+    if (!syncStatus.enabled) return c.json({ error: 'sync is not set up: set PANYA_SYNC_URL, PANYA_SYNC_KEY and PANYA_SYNC_BRAINS' }, 400)
+    return c.json({ results: await syncOnce(store) })
+  })
+
+  // { brain, model, upsert?: [{ id, doc, meta, embedding }] (ไม่เกิน 500), delete?: [id] (ไม่เกิน 5000), entities? }
+  app.post('/v1/sync/push', async (c) => {
+    const b = await c.req.json().catch(() => null)
+    const brain = brainOf(c.get('wscope'), b?.brain)
+    if (!brain) return c.json(denied, 403)
+    if (b.model !== config.embed.model) return c.json({ error: `embedding model differs: this server uses ${config.embed.model}` }, 409)
+    const upsert = b.upsert ?? [], del = b.delete ?? [], entities = b.entities ?? []
+    if (!Array.isArray(upsert) || upsert.length > 500) return c.json({ error: 'upsert must be a list of at most 500 rows' }, 400)
+    if (!Array.isArray(del) || del.length > 5000 || !del.every((x: unknown) => typeof x === 'string' && SYNC_ID.test(x))) return c.json({ error: 'delete must be a list of at most 5000 ids' }, 400)
+    if (!Array.isArray(entities) || !entities.every(validEntity)) return c.json({ error: 'invalid entities' }, 400)
+    for (let i = 0; i < upsert.length; i++) {
+      const err = validRaw(upsert[i])
+      if (err) return c.json({ error: `row ${i}: ${err}` }, 400)
+    }
+    // แถวที่ดูเหมือนมีความลับไม่เก็บ แถวอื่นในชุดยังเก็บตามปกติ และบอกกลับว่าข้ามแถวไหน
+    const refused = upsert.filter((x: any) => rawSecret(x.meta)).map((x: any) => x.id as string)
+    const rows = refused.length ? upsert.filter((x: any) => !refused.includes(x.id)) : upsert
+    changed()
+    for (const e of entities) await store.entities.register(brain, e.type, e.cues ?? [], e.names ?? [])
+    await store.deleteIds(brain, del)
+    await store.putRaw(brain, rows)
+    if (rows.length) emit({ type: 'in', brain, n: rows.length, text: snip(String(rows[0].meta.text)), group: groupOf(String(rows[0].meta.source ?? ''), String(rows[0].meta.subject ?? ''), String(rows[0].meta.kind ?? 'fact') as any), created: rows.length, superseded: 0, merged: 0 })
+    return c.json({ brain, upserted: rows.length, deleted: del.length, refused })
   })
 
   // ── เอกสารยาว ───────────────────────────────────────────────────
