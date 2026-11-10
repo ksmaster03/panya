@@ -10,8 +10,10 @@
   },
   "dependencies": {
     "@huggingface/transformers": "^4.3.1",
+    "fflate": "^0.8.3",
     "hono": "^4.13.13",
-    "seekdb": "^1.4.0"
+    "seekdb": "^1.4.0",
+    "unpdf": "^2.1.0"
   },
   "scripts": {
     "dev": "bun --hot src/index.ts",

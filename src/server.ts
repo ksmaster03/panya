@@ -5,6 +5,9 @@ import { config, type SearchTuning } from './config'
 import type { Memory, MemoryStore, RememberInput } from './memory'
 import { isPanya } from './governor'
 import { chunkDoc, type ChunkOptions } from './chunk'
+import { asrAvailable, extOf, extractDocument, kindOf, ocr, ocrAvailable, transcribe, type FileKind } from './extract'
+import { tmpdir } from 'node:os'
+import { unlink } from 'node:fs/promises'
 import { MIN_PASSWORD, ROLES, USERNAME, randomPassword, type KeyLimits, type Role, type User } from './users'
 import { findSecret } from './secrets'
 import { mountMcp } from './mcp'
@@ -683,6 +686,24 @@ export function createApp(
   // { brain, text, source, panya?, max?, overlap?, headings? } ตัดเอกสารเป็นท่อนด้วย chunkDoc แล้วเก็บเป็นความจำ
   // ทุกท่อนมี source เดียวกันและ ref = source#ลำดับ · ส่ง source เดิมซ้ำ = แทนที่ท่อนชุดเก่าทั้งหมด
   // ทุกท่อนผ่านกฎเดียวกับความจำทั่วไป ถ้าท่อนใดมีความลับ จะไม่บันทึกอะไรเลย
+  // ตัดข้อความเป็นท่อนแล้วเก็บแทนท่อนชุดเก่าของ source เดียวกัน · คืนข้อความผิดพลาด หรือผลการบันทึก
+  // ทุกท่อนผ่านกฎเดียวกับความจำทั่วไป ถ้าท่อนใดมีความลับ จะไม่บันทึกอะไรเลย
+  const ingest = async (brain: string, text: string, source: string, b: { kind?: unknown; panya?: unknown }, opts: ChunkOptions = {}) => {
+    const parts = chunkDoc(text, opts)
+    if (!parts.length) return 'document has no text'
+    if (parts.length > IMPORT_MAX) return `document makes too many chunks (${parts.length}, max ${IMPORT_MAX})`
+    const inputs = parseMany(brain, parts.map((p, i) => ({ text: p.text, source, ref: `${source}#${i}`, kind: b.kind, panya: b.panya })), IMPORT_MAX)
+    if (typeof inputs === 'string') return inputs
+    changed()
+    await store.forgetSource(brain, source)
+    const counts = { created: 0, superseded: 0, merged: 0 }
+    for (let i = 0; i < inputs.length; i += 200) {
+      for (const r of await store.rememberMany(inputs.slice(i, i + 200))) counts[r.action]++
+    }
+    emit({ type: 'in', brain, n: inputs.length, text: snip(source), group: groupOfInput(inputs[0]!), ...counts })
+    return { brain, source, chunks: parts.length, ...counts }
+  }
+
   app.post('/v1/documents', async (c) => {
     const b = await c.req.json().catch(() => null)
     const brain = brainOf(c.get('wscope'), b?.brain, b?.container)
@@ -694,19 +715,91 @@ export function createApp(
     if (b.max !== undefined) { if (!Number.isInteger(b.max) || b.max < 100 || b.max > 2000) return c.json({ error: 'max must be an integer 100-2000' }, 400); opts.max = b.max }
     if (b.overlap !== undefined) { if (!Number.isInteger(b.overlap) || b.overlap < 0 || b.overlap > 1000) return c.json({ error: 'overlap must be an integer 0-1000' }, 400); opts.overlap = b.overlap }
     if (b.headings !== undefined) { if (typeof b.headings !== 'boolean') return c.json({ error: 'headings must be boolean' }, 400); opts.headings = b.headings }
-    const parts = chunkDoc(b.text, opts)
-    if (!parts.length) return c.json({ error: 'document has no text' }, 400)
-    if (parts.length > IMPORT_MAX) return c.json({ error: `document makes too many chunks (${parts.length}, max ${IMPORT_MAX})` }, 400)
-    const inputs = parseMany(brain, parts.map((p, i) => ({ text: p.text, source: b.source, ref: `${b.source}#${i}`, kind: b.kind, panya: b.panya })), IMPORT_MAX)
-    if (typeof inputs === 'string') return c.json({ error: inputs }, 400)
-    changed()
-    await store.forgetSource(brain, b.source)
-    const counts = { created: 0, superseded: 0, merged: 0 }
-    for (let i = 0; i < inputs.length; i += 200) {
-      for (const r of await store.rememberMany(inputs.slice(i, i + 200))) counts[r.action]++
+    const r = await ingest(brain, b.text, b.source, b, opts)
+    return typeof r === 'string' ? c.json({ error: r }, 400) : c.json(r, 201)
+  })
+
+  // ── ไฟล์ทุกชนิด ─────────────────────────────────────────────────
+  // multipart: file, brain, source? (ค่าเริ่มต้น = ชื่อไฟล์), panya?, kind? · ดึงข้อความด้วย src/extract.ts แล้วเก็บเหมือน /v1/documents
+  // ไม่เก็บไฟล์ต้นฉบับ เก็บเฉพาะข้อความ · ถอดเสียงใช้เวลาราวความยาวคลิป จึงทำเป็นงานเบื้องหลังทีละงาน
+  // ตอบ 202 { job } แล้วดูผลที่ GET /v1/files/jobs/:id · ใส่ ?wait=1 เพื่อรอจนเสร็จ (เหมาะกับเอกสาร)
+  type Job = { id: string; brain: string; name: string; source: string; type: FileKind; status: 'queued' | 'running' | 'done' | 'error'; progress: number; createdAt: number; result?: unknown; error?: string; done: Promise<void> }
+  const jobs = new Map<string, Job>()
+  let queue: Promise<void> = Promise.resolve()
+  const showJob = ({ done: _, ...j }: Job) => j
+
+  app.get('/v1/files/types', async (c) => c.json({
+    maxMb: config.files.maxMb,
+    document: ['pdf', 'docx', 'pptx', 'xlsx', 'odt', 'odp', 'ods', 'epub', 'rtf', 'html', 'txt', 'md', 'csv', 'tsv', 'json', 'srt', 'vtt', 'any other text file'],
+    media: (await asrAvailable()) ? { enabled: true, model: config.files.asrModel } : { enabled: false, hint: 'install faster-whisper (pip install faster-whisper) on the server' },
+    image: (await ocrAvailable()) ? { enabled: true, lang: config.files.ocrLang } : { enabled: false, hint: 'install tesseract with the Thai language pack on the server' },
+  }))
+
+  app.post('/v1/files', async (c) => {
+    const form = await c.req.formData().catch(() => null)
+    const file = form?.get('file')
+    const brain = brainOf(c.get('wscope'), form?.get('brain'), form?.get('container'))
+    if (!brain) return c.json(denied, 403)
+    if (!(file instanceof File) || !file.size) return c.json({ error: 'file is required (multipart field "file")' }, 400)
+    if (file.size > config.files.maxMb * 1024 * 1024) return c.json({ error: `file too large (max ${config.files.maxMb} MB)` }, 413)
+    const name = (file.name || 'file').split(/[\\/]/).pop()!.slice(0, 160)
+    const sourceIn = form!.get('source')
+    const source = typeof sourceIn === 'string' && sourceIn.trim() ? sourceIn.trim() : name
+    if (source.length > 160) return c.json({ error: 'source too long (max 160)' }, 400)
+    const fields = { kind: form!.get('kind') || undefined, panya: form!.get('panya') || undefined }
+    if (fields.kind !== undefined && !KINDS.has(String(fields.kind))) return c.json({ error: 'invalid kind' }, 400)
+    if (fields.panya !== undefined && !isPanya(fields.panya)) return c.json({ error: 'panya must be suta, cinta or bhavana' }, 400)
+    const type = kindOf(name, file.type)
+    if (typeof type !== 'string') return c.json({ error: type.unsupported }, 415)
+    if (type === 'media' && !(await asrAvailable())) return c.json({ error: 'audio and video need faster-whisper on the server (pip install faster-whisper), which this server does not have' }, 415)
+    if (type === 'image' && !(await ocrAvailable())) return c.json({ error: 'images need tesseract OCR on the server, which this server does not have' }, 415)
+    const bytes = new Uint8Array(await file.arrayBuffer())
+
+    const id = crypto.randomUUID()
+    const job = { id, brain, name, source, type, status: 'queued', progress: 0, createdAt: Date.now() } as Job
+    const run = async () => {
+      job.status = 'running'
+      let tmp = ''
+      try {
+        let text: string
+        if (type === 'media' || type === 'image') {
+          // โปรแกรมภายนอกอ่านจากไฟล์: เขียนลงไฟล์ชั่วคราวแล้วลบทิ้งเมื่อเสร็จ
+          tmp = `${tmpdir()}/panya-${id}.${extOf(name) || 'bin'}`
+          await Bun.write(tmp, bytes)
+          text = type === 'media' ? await transcribe(tmp, (p) => { job.progress = p }) : await ocr(tmp)
+          // ทุกท่อนขึ้นต้นด้วยชื่อไฟล์: ค้นเจอแล้วรู้ว่ามาจากคลิปหรือภาพไหน
+          if (text.trim()) text = `# ${name}\n${text}`
+        } else text = await extractDocument(name, bytes)
+        if (!text.trim()) throw new Error(type === 'media' ? 'no speech found' : type === 'image' ? 'no text found in the image' : 'document has no text')
+        // คำพูดถอดจากเสียงแน่นกว่าเอกสาร: ท่อนสั้นค้นเจอดีกว่า (ลองบนคลิปตัวอย่าง: คำถามที่ไม่ตรงตัว 0.27 -> 0.38)
+        const r = await ingest(brain, text, source, fields, type === 'media' ? { max: 150, overlap: 60 } : {})
+        if (typeof r === 'string') throw new Error(r)
+        job.result = { ...r, type, chars: text.length }
+        job.status = 'done'
+        job.progress = 1
+      } catch (e) {
+        job.status = 'error'
+        job.error = (e as Error).message
+      } finally {
+        if (tmp) await unlink(tmp).catch(() => {})
+      }
     }
-    emit({ type: 'in', brain, n: inputs.length, text: snip(b.source), group: groupOfInput(inputs[0]!), ...counts })
-    return c.json({ brain, source: b.source, chunks: parts.length, ...counts }, 201)
+    job.done = queue = queue.then(run)
+    jobs.set(id, job)
+    // สถานะงานอยู่ในหน่วยความจำ (หายเมื่อเริ่มเซิร์ฟเวอร์ใหม่) เก็บงานที่จบแล้วไว้ไม่เกิน 200 งาน
+    for (const [k, j] of jobs) { if (jobs.size <= 200) break; if (j.status === 'done' || j.status === 'error') jobs.delete(k) }
+    if (c.req.query('wait') === '1') {
+      await job.done
+      return job.status === 'done' ? c.json({ job: showJob(job) }, 201) : c.json({ error: job.error, job: showJob(job) }, 400)
+    }
+    return c.json({ job: showJob(job) }, 202)
+  })
+
+  app.get('/v1/files/jobs/:id', (c) => {
+    const job = jobs.get(c.req.param('id'))
+    // งานของ brain ที่ไม่มีสิทธิ์เขียน = ไม่พบ
+    if (!job || brainOf(c.get('wscope'), job.brain) !== job.brain) return c.json({ error: 'not found' }, 404)
+    return c.json({ job: showJob(job) })
   })
 
   // ── ชื่อเฉพาะ ────────────────────────────────────────────────────

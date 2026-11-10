@@ -87,6 +87,9 @@ Every route under `/v1` needs `Authorization: Bearer <key>`.
 |---|---|
 | `POST /v1/memories` | Store `{ brain, text, subject?, attribute?, kind?, validUntil?, source?, ref?, panya? }` |
 | `POST /v1/documents` | Split a long document into chunks and store them: `{ brain, text, source, panya?, max?, overlap?, headings? }`. See [Long documents](#long-documents-and-chunking) |
+| `POST /v1/files` | Upload a file (multipart: `file`, `brain`, `source?`, `panya?`, `kind?`): documents, audio, video or images. Returns a job; add `?wait=1` to wait. See [Files](#files-documents-audio-video-images) |
+| `GET /v1/files/jobs/:id` | Status of an upload: `queued`, `running` (with `progress`), `done` or `error` |
+| `GET /v1/files/types` | Which file types this server can read, and whether audio and images are enabled |
 | `PATCH /v1/memories/:id` | Set or clear the wisdom label: `{ brain, panya }` |
 | `POST /v1/memories/batch` | Store up to 200 at once: `{ brain, memories: [...] }`. All-or-nothing validation |
 | `POST /v1/search` | `{ brain, q, limit?, minScore?, rerank?, panya? }` returns `{ hits, abstained, reason? }`. `rerank: false` skips the optional reranker for this request |
@@ -115,7 +118,7 @@ A **brain** is one isolated set of memories (one customer, one project, one agen
 
 ## Brain view
 
-Open `http://127.0.0.1:6800/brain` and sign in with a brain name and its API key. The page has an export button that downloads the whole brain as JSON. Every memory is a point inside a brain outline; memories with similar meaning sit close together and are joined by lines. Type a question and the matching memories light up, or the page tells you the brain chose not to answer. The page itself holds no data: everything comes from `/v1/graph` and `/v1/search` with your key.
+Open `http://127.0.0.1:6800/brain` and sign in with a brain name and its API key. The page has an export button that downloads the whole brain as JSON, and an **Add files** button (or drop files onto the brain) that sends documents, audio, video and images to `/v1/files`. Every memory is a point inside a brain outline; memories with similar meaning sit close together and are joined by lines. Type a question and the matching memories light up, or the page tells you the brain chose not to answer. The page itself holds no data: everything comes from `/v1/graph` and `/v1/search` with your key.
 
 ## Import Claude Code memory
 
@@ -199,6 +202,16 @@ Measured on 9 November 2026 (`bun eval/govern.ts --ollama`). The fresh set is 30
 | proto, embedding + cue words | 97% | 77% | about 20 ms |
 | ollama `qwen3:4b-instruct` | 92% | 90% | about 1.7 s |
 
+Smaller models were tried on 10 November 2026 and none of them is good enough. Each one did worse than proto on the fresh set, so `qwen3:4b-instruct` stays the smallest model worth running.
+
+| Model (Ollama) | Size | Holdout (36) | Fresh set (30) | Time per memory |
+|---|---|---|---|---|
+| `qwen3:1.7b` | 1.4 GB | 78% | 50% | about 0.9 s |
+| `qwen2.5:1.5b` | 1.0 GB | 72% | 43% | about 0.7 s |
+| `qwen3:0.6b` | 0.5 GB | 56% | not run | about 0.5 s |
+| `llama3.2:1b` | 1.3 GB | 33% | not run | about 1.0 s |
+| `gemma3:1b` | 0.8 GB | 33% | not run | about 2.2 s |
+
 Read the proto holdout number with care: the cue words were written by someone who had seen those sentences, so the fresh set (77%) is the honest figure. Two things went wrong on the way and are handled in the code. `qwen3:4b` (the thinking model) ignored `think: false` and took about 60 s per memory. Forcing a JSON enum made it answer `suta` for everything.
 
 ## Long documents and chunking
@@ -222,6 +235,37 @@ The defaults (`max 300, overlap 120, headings on`) were chosen with `bun eval/ch
 The Claude Code memory and skill importers keep the paragraph chunker on purpose. Those memories must be rebuilt into the original file byte for byte, and headings and overlap would break that. The set is small and the defaults were picked on it, so check them on your own documents.
 
 `bun eval/run.ts` now also reports MRR and nDCG@5 next to the rank-1 and top-3 numbers.
+
+## Files: documents, audio, video, images
+
+`POST /v1/files` takes any file, pulls the text out of it and stores it the same way as `/v1/documents`. The source defaults to the file name, so uploading a file with the same name again replaces its old chunks. Only the text is kept; the file itself is not stored. On the brain page, use the **Add files** button or drop files onto the brain.
+
+| Kind | Types | How the text is read |
+|---|---|---|
+| Documents | PDF, Word (`docx`), PowerPoint (`pptx`, with speaker notes), Excel (`xlsx`), OpenDocument (`odt`, `odp`, `ods`), EPUB, RTF, HTML | In JavaScript, no extra programs. Pages, slides and sheets become headings, so every chunk says where it came from. Table rows become `column: value · column: value` |
+| Text | `txt`, `md`, `csv`, `tsv`, `json`, `srt`, `vtt` and any other text file (code, logs, config) | UTF-8, UTF-16 or TIS-620 (old Thai files) |
+| Audio and video | `mp3`, `wav`, `m4a`, `ogg`, `flac`, `mp4`, `mov`, `mkv`, `webm` and more | Speech to text with [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (`large-v3-turbo`) through `scripts/transcribe.py`. Every line keeps its time, for example `[1:05] ...` |
+| Images | `png`, `jpg`, `webp`, `tiff`, `bmp`, `gif` | OCR with Tesseract (`tha+eng`) |
+
+The text is the file's own words. Speech recognition and OCR transcribe; they do not summarise or rewrite. Every chunk goes through the same secret check as any other memory.
+
+Audio, video and images need programs on the server, and the server turns them on by itself when it finds them (`GET /v1/files/types` shows what it found).
+
+- Speech: `pip install faster-whisper`. The model (about 800 MB) downloads on first use. Video works without ffmpeg.
+- OCR: Tesseract with the Thai language pack. The Docker image already includes it.
+- The Docker image does not include speech recognition: it needs Python and is too slow on a 4 GB machine. Upload audio and video to a panya that runs on a computer with faster-whisper.
+
+Settings: `PANYA_UPLOAD_MAX_MB` (default 200; Cloudflare's free plan stops uploads at 100 MB), `PANYA_ASR` and `PANYA_OCR` (`off` turns them off), `PANYA_PYTHON`, `PANYA_ASR_MODEL`, `PANYA_ASR_LANG` (empty = detect), `PANYA_TESSERACT`, `PANYA_OCR_LANG`.
+
+What was checked on 10 November 2026 (`bun test test/files.test.ts`):
+
+- Speech: on 45 s of Thai speech, `large-v3-turbo` got almost every word right and took 39 s on this laptop's CPU. `small` took 393 s and made far more mistakes. Whisper running inside Bun (transformers.js) only repeated one word, so it is not used.
+- OCR: about 0.6 s per image in the Docker image. Numbers and English come out right; Thai sometimes loses a tone mark (หนี้ becomes หนี).
+- PDF: some Thai PDFs store a character in a way pdf.js cannot read back. In the test file, น้ำ came out as นำ.
+- Transcripts are cut into 150-character chunks, not 300. On the test clip, a question that does not repeat the clip's words scored 0.38 instead of 0.27. This is one clip, not a benchmark.
+- Not supported: old binary Office files (`doc`, `xls`, `ppt`: save them as `docx`, `xlsx`, `pptx`) and scanned PDFs without a text layer (export the pages as images).
+
+Uploads are processed one at a time in the background. The job list lives in memory, so it is lost when the server restarts.
 
 ## Reranker (optional)
 

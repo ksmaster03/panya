@@ -23,6 +23,9 @@ RUN if [ "$BAKE_RERANKER" = "1" ]; then bun -e "import('./src/rerank.ts').then((
 # ── server (target platform) ─────────────────────────────────────────
 FROM oven/bun:1.3 AS base
 WORKDIR /app
+# OCR สำหรับไฟล์ภาพที่ส่งเข้า POST /v1/files (ภาษาไทย + อังกฤษ ราว 40 MB)
+# ไม่ใส่ตัวถอดเสียง (faster-whisper ต้องใช้ Python + โมเดลราว 800 MB และช้าบนเครื่อง 4 GB): เสียง/วิดีโอใช้กับ panya ที่รันบนเครื่องที่ติดตั้งไว้
+RUN apt-get update && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-tha && rm -rf /var/lib/apt/lists/*
 
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile --production

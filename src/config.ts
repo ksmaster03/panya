@@ -49,6 +49,20 @@ export const config = {
     // แต้มต่อของหมวดสุตมยเมื่อข้อความไม่มีคำบ่งชี้ของอีกสองหมวด
     sutaPrior: num(process.env.PANYA_GOVERNOR_SUTA_PRIOR, 0.002),
   },
+  // นำเข้าไฟล์ (POST /v1/files): เอกสารอ่านใน JS ได้เสมอ · เสียง/วิดีโอและภาพใช้โปรแกรมในเครื่อง
+  // asr/ocr: auto = ใช้เมื่อเครื่องนี้มีโปรแกรม (ค่าเริ่มต้น) · off = ปิด
+  files: {
+    maxMb: num(process.env.PANYA_UPLOAD_MAX_MB, 200),
+    asr: (process.env.PANYA_ASR === 'off' ? 'off' : 'auto') as 'auto' | 'off',
+    python: process.env.PANYA_PYTHON ?? 'python',
+    // เลือกจากการลองถอดเสียงพูดไทย: large-v3-turbo ถูกเกือบทุกคำ เร็วพอบน CPU · small ผิดเยอะและช้ากว่า
+    asrModel: process.env.PANYA_ASR_MODEL ?? 'mobiuslabsgmbh/faster-whisper-large-v3-turbo',
+    // ว่าง = ให้โมเดลตรวจภาษาเอง · th = บังคับไทย
+    asrLang: process.env.PANYA_ASR_LANG ?? '',
+    ocr: (process.env.PANYA_OCR === 'off' ? 'off' : 'auto') as 'auto' | 'off',
+    tesseract: process.env.PANYA_TESSERACT ?? 'tesseract',
+    ocrLang: process.env.PANYA_OCR_LANG ?? 'tha+eng',
+  },
   search: {
     // ค่าเหล่านี้ปรับจากชุดทดสอบ (bun run eval) อย่าเดา
     // ใช้เมื่อเปิด reranker: คะแนนสุดท้าย = (1 - rerankWeight) * คะแนนเดิม + rerankWeight * คะแนน reranker

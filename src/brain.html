@@ -50,6 +50,7 @@
   #stats { position: absolute; left: 14px; top: 10px; right: 14px; pointer-events: none; color: var(--ink2); font-size: 13px; font-variant-numeric: tabular-nums; }
   main { display: grid; grid-template-columns: 1fr 340px; min-height: 0; }
   #stage { position: relative; min-height: 0; overflow: hidden; }
+  #stage.dropping::after { content: attr(data-drop); position: absolute; inset: 10px; display: grid; place-items: center; border: 2px dashed var(--muted); border-radius: 14px; background: color-mix(in srgb, var(--bg) 72%, transparent); color: var(--ink); font-size: 15px; pointer-events: none; }
   canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
   canvas.dragging { cursor: grabbing; }
   canvas.pointing { cursor: pointer; }
@@ -111,6 +112,8 @@
       <button id="spin" type="button" aria-pressed="true"></button>
       <span data-i18n="hint"></span>
       <i class="grow"></i>
+      <button id="upload" type="button" data-i18n="upload" hidden></button>
+      <input id="file" type="file" multiple hidden>
       <button id="export" type="button" data-i18n="export" hidden></button>
       <button id="logout" type="button" data-i18n="signOut" hidden></button>
     </div>
@@ -149,7 +152,9 @@ const L = {
     results: 'ผลการค้น', resultsN: (n) => `ผลการค้น ${n} รายการ`, near: 'ความจำนี้และที่ใกล้เคียง', score: 'คะแนน',
     intro: 'พิมพ์คำถามด้านบน จุดที่เกี่ยวข้องจะสว่างขึ้นบนสมอง ชี้ที่จุดใดก็ได้เพื่ออ่านความจำนั้น', typeAbove: 'พิมพ์คำถามด้านบน',
     whyUnknown: 'ไม่ตอบ: คำถามนี้ถามถึงรายที่ไม่เคยปรากฏในความจำ', whyNoMatch: 'ไม่มีความจำที่เกี่ยวข้องพอ สมองเลือกตอบว่าไม่รู้',
-    emptyBrain: 'สมองนี้ยังไม่มีความจำ เก็บความจำแรกด้วย POST /v1/memories แล้วโหลดหน้านี้ใหม่',
+    emptyBrain: 'สมองนี้ยังไม่มีความจำ เพิ่มไฟล์ด้วยปุ่ม "เพิ่มไฟล์" หรือเก็บความจำแรกด้วย POST /v1/memories',
+    upload: 'เพิ่มไฟล์', drop: 'วางไฟล์ที่นี่เพื่อเพิ่มเข้าสมอง (เอกสาร เสียง วิดีโอ ภาพ)',
+    upQueued: (f) => `รอคิว ${f}…`, upRunning: (f, p) => `กำลังอ่าน ${f}${p ? ' ' + p + '%' : '…'}`, upDone: (f, n) => `เพิ่ม ${f} แล้ว ${n} ท่อน`, upFail: (f, m) => `เพิ่ม ${f} ไม่ได้: ${m}`,
     pfAria: 'กรองตามหมวดปัญญา', pAll: 'ทุกหมวด', pSuta: 'สุตมย · ฟัง/อ่าน', pCinta: 'จินตมย · คิด', pBhavana: 'ภาวนามย · ลงมือ',
     suta: 'สุตมยปัญญา', cinta: 'จินตมยปัญญา', bhavana: 'ภาวนามยปัญญา',
     stats: (n, e, b) => `${n} ความจำ · ${e} เส้นเชื่อม · ${b}`, badKey: 'API key ไม่ถูกต้อง', wrongBrain: 'key นี้ใช้กับสมองนี้ไม่ได้', serverSays: (n) => `เซิร์ฟเวอร์ตอบ ${n}`, raw: (m) => m,
@@ -163,7 +168,9 @@ const L = {
     results: 'Search results', resultsN: (n) => `${n} search results`, near: 'This memory and its neighbours', score: 'Score',
     intro: 'Type a question above. Matching points light up on the brain. Point at any dot to read that memory.', typeAbove: 'Type a question above',
     whyUnknown: 'No answer: the question names something that never appears in this brain', whyNoMatch: 'No memory was relevant enough, so the brain chose to say it does not know',
-    emptyBrain: 'This brain has no memories yet. Store the first one with POST /v1/memories, then reload this page.',
+    emptyBrain: 'This brain has no memories yet. Add a file with the "Add files" button, or store the first memory with POST /v1/memories.',
+    upload: 'Add files', drop: 'Drop files here to add them to the brain (documents, audio, video, images)',
+    upQueued: (f) => `Waiting: ${f}…`, upRunning: (f, p) => `Reading ${f}${p ? ' ' + p + '%' : '…'}`, upDone: (f, n) => `Added ${f}: ${n} chunks`, upFail: (f, m) => `Could not add ${f}: ${m}`,
     pfAria: 'Filter by kind of wisdom', pAll: 'All wisdom', pSuta: 'Suta · heard/read', pCinta: 'Cinta · reasoned', pBhavana: 'Bhavana · practised',
     suta: 'Suta (learned)', cinta: 'Cinta (reasoned)', bhavana: 'Bhavana (practised)',
     stats: (n, e, b) => `${n} memories · ${e} links · ${b}`, badKey: 'That API key is not valid', wrongBrain: 'This key does not work for this brain', serverSays: (n) => `Server responded ${n}`, raw: (m) => m,
@@ -570,7 +577,7 @@ async function open() {
   opened = true; showStats()
   $('legend').innerHTML = groups.slice(0, 10).map(([name, c]) => `<span><i style="background:${color.get(name)};color:${color.get(name)}"></i>${esc(name)} ${c}</span>`).join('')
   $('gate').style.display = 'none'
-  $('export').hidden = false; $('logout').hidden = false
+  $('export').hidden = false; $('logout').hidden = false; $('upload').hidden = false
   if (!nodes.length) showList(['results'], [], ['emptyBrain'])
 }
 let opened = false
@@ -614,6 +621,42 @@ $('export').addEventListener('click', async () => {
     URL.revokeObjectURL(a.href)
   } catch (e) { $('stats').textContent = e.message }
 })
+
+// เพิ่มไฟล์เข้าสมอง: POST /v1/files ทีละไฟล์ แล้วติดตามงานจนเสร็จ (ถอดเสียงอาจใช้เวลาราวความยาวคลิป)
+async function addFiles(files) {
+  if (!opened || !files.length) return
+  let added = 0
+  for (const f of files) {
+    const say = (...a) => { $('stats').textContent = t(...a) }
+    try {
+      const form = new FormData(); form.set('file', f); form.set('brain', cfg.container)
+      const res = await fetch('/v1/files', { method: 'POST', headers: cfg.key ? { authorization: 'Bearer ' + cfg.key } : {}, body: form })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(body.error || t('serverSays', res.status))
+      let job = body.job
+      while (job.status === 'queued' || job.status === 'running') {
+        say(job.status === 'queued' ? 'upQueued' : 'upRunning', f.name, Math.round(job.progress * 100))
+        await new Promise((r) => setTimeout(r, 1500))
+        job = (await api('/v1/files/jobs/' + job.id)).job
+      }
+      if (job.status !== 'done') throw new Error(job.error)
+      added++
+      say('upDone', f.name, job.result.chunks)
+    } catch (e) { say('upFail', f.name, e.message); await new Promise((r) => setTimeout(r, 2500)) }
+  }
+  // วาดสมองใหม่ให้เห็นจุดของความจำที่เพิ่ม แล้วคงข้อความผลล่าสุดไว้
+  if (added) { const msg = $('stats').textContent; await open().catch(() => {}); $('stats').textContent = msg }
+}
+$('upload').addEventListener('click', () => $('file').click())
+$('file').addEventListener('change', () => { const fs = [...$('file').files]; $('file').value = ''; addFiles(fs) })
+{
+  const stage = $('stage')
+  let depth = 0
+  stage.addEventListener('dragenter', (ev) => { if (!opened || !ev.dataTransfer?.types.includes('Files')) return; ev.preventDefault(); depth++; stage.dataset.drop = t('drop'); stage.classList.add('dropping') })
+  stage.addEventListener('dragover', (ev) => { if (opened && ev.dataTransfer?.types.includes('Files')) ev.preventDefault() })
+  stage.addEventListener('dragleave', () => { if (--depth <= 0) { depth = 0; stage.classList.remove('dropping') } })
+  stage.addEventListener('drop', (ev) => { if (!opened) return; ev.preventDefault(); depth = 0; stage.classList.remove('dropping'); addFiles([...ev.dataTransfer.files]) })
+}
 
 // ล็อกอินด้วยชื่อผู้ใช้แล้ว (cookie): ไม่ต้องใช้ key · เลือกสมองจาก ?brain หรือสมองแรกที่ผู้ใช้เข้าได้
 const me = window.PANYA_USER
