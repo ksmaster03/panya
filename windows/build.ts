@@ -1,6 +1,6 @@
 // สร้างตัวติดตั้งแอป Windows: bun windows/build.ts → dist/windows/Panya-Setup.exe
 // ต้องรันบน Windows x64 (Panya.exe คอมไพล์จาก bun ของเครื่องนี้ และใช้โมเดล e5-small ในแคชของ transformers)
-import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readSync, rmSync, statSync, writeSync } from 'node:fs'
 import { join } from 'node:path'
 
 const ROOT = join(import.meta.dir, '..')
@@ -15,6 +15,21 @@ const sh = (cmd: string[], cwd = ROOT) => {
   if (r.exitCode !== 0) throw new Error(`failed: ${cmd.join(' ')}`)
 }
 const size = (p: string): number => (statSync(p).isDirectory() ? readdirSync(p).reduce((s, f) => s + size(join(p, f)), 0) : statSync(p).size)
+/**
+ * ตั้ง subsystem ของ exe เป็น GUI: --windows-hide-console ยังเปิดหน้าต่าง Windows Terminal ว่าง ๆ บนเครื่องที่ตั้ง Terminal เป็น console หลัก
+ * โปรแกรม GUI ไม่มี console เลย (ผลลัพธ์ของเราเขียนลงไฟล์ log อยู่แล้ว)
+ */
+function guiSubsystem(exe: string) {
+  const fd = openSync(exe, 'r+')
+  const b = Buffer.alloc(4)
+  readSync(fd, b, 0, 4, 0x3c)
+  const pe = b.readUInt32LE(0)
+  readSync(fd, b, 0, 4, pe)
+  if (b.readUInt32LE(0) !== 0x4550) throw new Error(`${exe}: not a PE file`)
+  // optional header เริ่มที่ pe + 24 · Subsystem อยู่ที่ offset 68 ทั้ง PE32 และ PE32+
+  writeSync(fd, Buffer.from([2, 0]), 0, 2, pe + 24 + 68)
+  closeSync(fd)
+}
 const mb = (n: number) => `${(n / 1024 / 1024).toFixed(0)} MB`
 
 if (process.platform !== 'win32') throw new Error('build on Windows x64')
@@ -47,6 +62,7 @@ cpSync(join(cache, 'onnx', 'model_quantized.onnx'), join(dest, 'onnx', 'model_qu
 console.log('4/6 launcher (also the runtime: it runs the server as bun with BUN_BE_BUN=1)')
 const win = ['--windows-icon=' + join(import.meta.dir, 'panya.ico'), '--windows-title=Panya', '--windows-publisher=ksmaster03', `--windows-version=${VERSION}.0`, '--windows-copyright=PolyForm Noncommercial 1.0.0']
 sh([process.execPath, 'build', '--compile', '--target=bun-windows-x64', '--windows-hide-console', ...win, '--windows-description=Panya second brain', join(import.meta.dir, 'launcher.ts'), '--outfile', join(STAGE, 'Panya.exe')])
+guiSubsystem(join(STAGE, 'Panya.exe'))
 console.log(`   app folder ${mb(size(STAGE))}`)
 
 console.log('5/6 pack')
@@ -54,5 +70,6 @@ sh([join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe'), '-czf'
 console.log(`   payload ${mb(size(join(OUT, 'payload.tar.gz')))}`)
 
 console.log('6/6 setup program')
-sh([process.execPath, 'build', '--compile', '--target=bun-windows-x64', ...win, '--windows-description=Panya setup', `--define=PANYA_VERSION=${JSON.stringify(VERSION)}`, join(import.meta.dir, 'setup.ts'), '--outfile', join(OUT, 'Panya-Setup.exe')])
+sh([process.execPath, 'build', '--compile', '--target=bun-windows-x64', '--windows-hide-console', ...win, '--windows-description=Panya setup', `--define=PANYA_VERSION=${JSON.stringify(VERSION)}`, join(import.meta.dir, 'setup.ts'), '--outfile', join(OUT, 'Panya-Setup.exe')])
+guiSubsystem(join(OUT, 'Panya-Setup.exe'))
 console.log(`done: ${join(OUT, 'Panya-Setup.exe')} (${mb(size(join(OUT, 'Panya-Setup.exe')))})`)

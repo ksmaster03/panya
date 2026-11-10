@@ -2,11 +2,15 @@
 // ไม่มีอาร์กิวเมนต์ = เปิดเซิร์ฟเวอร์ถ้ายังไม่เปิด แล้วเปิดเบราว์เซอร์ · --background = เปิดเซิร์ฟเวอร์อย่างเดียว (ตอนล็อกอิน Windows)
 // --stop = ปิดเซิร์ฟเวอร์ · --uninstall [--purge] = ถอนการติดตั้ง (--purge ลบความจำทั้งหมดด้วย)
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, openSync, readFileSync, rmdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 const APP = dirname(process.execPath)
-const HOME = join(process.env.LOCALAPPDATA ?? join(process.env.USERPROFILE ?? '.', 'AppData', 'Local'), 'Panya')
+// โฟลเดอร์ความจำและค่าตั้ง: ตัวช่วยติดตั้งเขียนที่เลือกไว้ใน data-dir.txt ข้างโปรแกรม · ไม่มีไฟล์ = ที่ตั้งต้น
+const DEFAULT_HOME = join(process.env.LOCALAPPDATA ?? join(process.env.USERPROFILE ?? '.', 'AppData', 'Local'), 'Panya')
+const HOME = (() => {
+  try { return readFileSync(join(APP, 'data-dir.txt'), 'utf8').replace(/^﻿/, '').trim() || DEFAULT_HOME } catch { return DEFAULT_HOME }
+})()
 const ENV_FILE = join(HOME, 'panya.env')
 const PID_FILE = join(HOME, 'server.pid')
 const LOG_FILE = join(HOME, 'logs', 'panya.log')
@@ -99,12 +103,18 @@ function uninstall(purge: boolean) {
     join(appData, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Panya'),
     join(appData, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup', 'Panya.lnk'),
     join(process.env.USERPROFILE ?? '', 'Desktop', 'Panya.lnk'),
+    join(process.env.OneDrive ?? process.env.USERPROFILE ?? '', 'Desktop', 'Panya.lnk'),
   ]
   for (const l of links) rmSync(l, { recursive: true, force: true })
   spawnSync('reg.exe', ['delete', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Panya', '/f'], { windowsHide: true })
-  if (purge) rmSync(HOME, { recursive: true, force: true })
+  // ลบโฟลเดอร์ความจำเฉพาะเมื่อดูแล้วเป็นของ Panya จริง (ผู้ใช้อาจเลือกโฟลเดอร์ที่มีไฟล์อื่น)
+  if (purge) {
+    for (const f of ['data', 'logs', 'panya.env', 'server.pid']) rmSync(join(HOME, f), { recursive: true, force: true })
+    try { rmdirSync(HOME) } catch {}
+  }
   // โฟลเดอร์โปรแกรมลบตอนตัวเองยังทำงานไม่ได้: ให้ cmd รอให้ตัวเปิดปิดก่อนแล้วค่อยลบ
-  spawn('cmd.exe', ['/d', '/c', `ping -n 3 127.0.0.1 >nul & rmdir /s /q "${APP}"`], { detached: true, stdio: 'ignore', windowsHide: true, windowsVerbatimArguments: true }).unref()
+  // ลบเฉพาะไฟล์ที่ตัวติดตั้งวางไว้ แล้วลบโฟลเดอร์เมื่อว่างเท่านั้น (rmdir ไม่มี /s) ไฟล์อื่นในโฟลเดอร์จึงไม่หาย
+  spawn('cmd.exe', ['/d', '/c', `ping -n 3 127.0.0.1 >nul & rmdir /s /q "${join(APP, 'app')}" & del /f /q "${join(APP, 'data-dir.txt')}" "${join(APP, 'Panya.exe')}" & rmdir "${APP}"`], { detached: true, stdio: 'ignore', windowsHide: true, windowsVerbatimArguments: true }).unref()
   if (!args.includes('--quiet')) alert(purge ? 'ถอนการติดตั้ง Panya และลบความจำทั้งหมดแล้ว\nPanya and all of its memories were removed.' : `ถอนการติดตั้ง Panya แล้ว ความจำยังเก็บไว้ที่\n${HOME}\n\nPanya was removed. Your memories are kept in the folder above.`)
 }
 
